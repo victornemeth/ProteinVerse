@@ -365,8 +365,7 @@ public class UmapPointCloud : MonoBehaviour
         // ── Click detection ─────────────────────────────────────
         // For controllers: index trigger fires a click.
         // For hands: a pinch-start while a point is hovered fires a click (NOT a grab).
-        bool clickFired = rTriggerDown
-                       || (rPinchDown && hoveredIndex >= 0);
+        bool clickFired = !isMovementEnabled && (rTriggerDown || (rPinchDown && hoveredIndex >= 0));
 
         if (clickFired)
         {
@@ -487,6 +486,16 @@ public class UmapPointCloud : MonoBehaviour
     void UpdateHover()
     {
         if (localPositions == null) return;
+
+        if (isMovementEnabled)
+        {
+            if (hoveredIndex >= 0)
+            {
+                hoveredIndex = -1;
+                if (infoLabel != null && selectedIndex < 0) infoLabel.gameObject.SetActive(false);
+            }
+            return;
+        }
 
         Transform aimSource = rightAimAnchor != null ? rightAimAnchor : rightAnchor;
         if (aimSource == null) return;
@@ -610,6 +619,8 @@ public class UmapPointCloud : MonoBehaviour
     void UpdateAimRay()
     {
         if (aimRay == null) return;
+        if (isMovementEnabled) { aimRay.enabled = false; return; }
+
         Transform aimSource = rightAimAnchor != null ? rightAimAnchor : rightAnchor;
         if (aimSource == null) { aimRay.enabled = false; return; }
 
