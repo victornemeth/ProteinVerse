@@ -276,13 +276,15 @@ public class WatchMenu : MonoBehaviour
 
         var surfGO = new GameObject("PokeSurface");
         surfGO.transform.SetParent(pokeGO.transform, false);
-        surfGO.transform.localScale = new Vector3(1f, 1f, 0.001f);
+        // Leave localScale as 1 to avoid making the surface bounds infinitely thin due to the globalScale
+        surfGO.transform.localScale = Vector3.one;
 
         var plane = surfGO.AddComponent<PlaneSurface>();
         plane.InjectAllPlaneSurface(PlaneSurface.NormalFacing.Backward, true);
 
         var clip = surfGO.AddComponent<BoundsClipper>();
-        clip.Size = new Vector3(panelWidth, panelHeight, 10f);
+        // Massive Z size ensures the finger won't skip through the clipping bounds in a single frame
+        clip.Size = new Vector3(panelWidth, panelHeight, 50000f);
 
         var cps = surfGO.AddComponent<ClippedPlaneSurface>();
         cps.InjectAllClippedPlaneSurface(plane, new IBoundsClipper[] { clip });
