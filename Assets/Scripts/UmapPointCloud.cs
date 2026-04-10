@@ -349,10 +349,13 @@ public class UmapPointCloud : MonoBehaviour
     void HandleInteraction()
     {
         // ── Raw input ───────────────────────────────────────────
-        bool rControllerGrip = OVRInput.Get(OVRInput.Button.PrimaryHandTrigger, OVRInput.Controller.RTouch);
-        bool lControllerGrip = OVRInput.Get(OVRInput.Button.PrimaryHandTrigger, OVRInput.Controller.LTouch);
+        bool rTracked = OVRInput.GetControllerPositionTracked(OVRInput.Controller.RTouch);
+        bool lTracked = OVRInput.GetControllerPositionTracked(OVRInput.Controller.LTouch);
 
-        // If holding controller grips, immediately activate move mode implicitly
+        bool rControllerGrip = rTracked && OVRInput.Get(OVRInput.Button.PrimaryHandTrigger, OVRInput.Controller.RTouch);
+        bool lControllerGrip = lTracked && OVRInput.Get(OVRInput.Button.PrimaryHandTrigger, OVRInput.Controller.LTouch);
+
+        // If holding active controller grips, immediately activate move mode implicitly
         if (rControllerGrip || lControllerGrip)
         {
             if (!wasControllerGrab)
