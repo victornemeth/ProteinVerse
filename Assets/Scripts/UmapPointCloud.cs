@@ -100,10 +100,11 @@ public class UmapPointCloud : MonoBehaviour
     [Header("Interaction")]
     public bool isMovementEnabled = false;
 
-    private bool rGrabActive, lGrabActive;
+    private enum GrabState { None, Right, Left, Both }
+    private GrabState currentGrabState = GrabState.None;
 
     private Vector3    grabStartPosR, grabStartPosL;
-    private Quaternion grabStartRotR;
+    private Quaternion grabStartRotR, grabStartRotL;
     private Vector3    cloudPosAtGrab;
     private Quaternion cloudRotAtGrab;
     private float      cloudScaleAtGrab;
@@ -406,68 +407,58 @@ public class UmapPointCloud : MonoBehaviour
         Quaternion lRot = leftAnchor  ? leftAnchor.rotation  : Quaternion.identity;
 
         // ── Two-hand grab: scale + translate ───────────────────
-        if (rGrip && lGrip)
+        GrabState newState = GrabState.None;
+        if (rGrip && lGrip) newState = GrabState.Both;
+        else if (rGrip)     newState = GrabState.Right;
+        else if (lGrip)     newState = GrabState.Left;
+
+        // If the state changed (e.g. dropping one hand, or grabbing a new hand), snapshot the anchors!
+        if (newState != currentGrabState)
         {
-            if (!rGrabActive || !lGrabActive)
+            currentGrabState = newState;
+            cloudPosAtGrab = transform.position;
+            cloudRotAtGrab = transform.rotation;
+
+            if (newState == GrabState.Both)
             {
-                rGrabActive = lGrabActive = true;
                 grabStartPosR     = rPos;
                 grabStartPosL     = lPos;
-                cloudPosAtGrab    = transform.position;
                 cloudScaleAtGrab  = transform.localScale.x;
                 twoHandDistAtGrab = Mathf.Max(Vector3.Distance(rPos, lPos), 0.01f);
             }
-            else
+            else if (newState == GrabState.Right)
             {
-                float newDist  = Mathf.Max(Vector3.Distance(rPos, lPos), 0.01f);
-                float newScale = Mathf.Clamp(cloudScaleAtGrab * (newDist / twoHandDistAtGrab), 0.05f, 10f);
-                transform.localScale = Vector3.one * newScale;
-                Vector3 midNow = (rPos + lPos) * 0.5f;
-                Vector3 mid0   = (grabStartPosR + grabStartPosL) * 0.5f;
-                transform.position = cloudPosAtGrab + (midNow - mid0);
+                grabStartPosR = rPos;
+                grabStartRotR = rRot;
+            }
+            else if (newState == GrabState.Left)
+            {
+                grabStartPosL = lPos;
+                grabStartRotL = lRot;
             }
         }
-        // ── Right-hand single grab ──────────────────────────────
-        else if (rGrip)
+
+        // Apply movement based on the current state
+        if (currentGrabState == GrabState.Both)
         {
-            if (!rGrabActive)
-            {
-                rGrabActive    = true;
-                lGrabActive    = false;
-                grabStartPosR  = rPos;
-                grabStartRotR  = rRot;
-                cloudPosAtGrab = transform.position;
-                cloudRotAtGrab = transform.rotation;
-            }
-            else
-            {
-                Quaternion delta = rRot * Quaternion.Inverse(grabStartRotR);
-                transform.rotation = delta * cloudRotAtGrab;
-                transform.position = rPos + delta * (cloudPosAtGrab - grabStartPosR);
-            }
+            float newDist  = Mathf.Max(Vector3.Distance(rPos, lPos), 0.01f);
+            float newScale = Mathf.Clamp(cloudScaleAtGrab * (newDist / twoHandDistAtGrab), 0.05f, 10f);
+            transform.localScale = Vector3.one * newScale;
+            Vector3 midNow = (rPos + lPos) * 0.5f;
+            Vector3 mid0   = (grabStartPosR + grabStartPosL) * 0.5f;
+            transform.position = cloudPosAtGrab + (midNow - mid0);
         }
-        // ── Left-hand single grab ───────────────────────────────
-        else if (lGrip)
+        else if (currentGrabState == GrabState.Right)
         {
-            if (!lGrabActive)
-            {
-                lGrabActive    = true;
-                rGrabActive    = false;
-                grabStartPosR  = lPos;
-                grabStartRotR  = lRot;
-                cloudPosAtGrab = transform.position;
-                cloudRotAtGrab = transform.rotation;
-            }
-            else
-            {
-                Quaternion delta = lRot * Quaternion.Inverse(grabStartRotR);
-                transform.rotation = delta * cloudRotAtGrab;
-                transform.position = lPos + delta * (cloudPosAtGrab - grabStartPosR);
-            }
+            Quaternion delta = rRot * Quaternion.Inverse(grabStartRotR);
+            transform.rotation = delta * cloudRotAtGrab;
+            transform.position = rPos + delta * (cloudPosAtGrab - grabStartPosR);
         }
-        else
+        else if (currentGrabState == GrabState.Left)
         {
-            rGrabActive = lGrabActive = false;
+            Quaternion delta = lRot * Quaternion.Inverse(grabStartRotL);
+            transform.rotation = delta * cloudRotAtGrab;
+            transform.position = lPos + delta * (cloudPosAtGrab - grabStartPosL);
         }
 
         // ── Right joystick Y → fine scale ──────────────────────
