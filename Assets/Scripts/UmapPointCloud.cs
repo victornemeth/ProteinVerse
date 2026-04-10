@@ -97,6 +97,9 @@ public class UmapPointCloud : MonoBehaviour
     //  Interaction State
     // ─────────────────────────────────────────────────────────────
 
+    [Header("Interaction")]
+    public bool isMovementEnabled = false;
+
     private bool rGrabActive, lGrabActive;
 
     private Vector3    grabStartPosR, grabStartPosL;
@@ -395,8 +398,8 @@ public class UmapPointCloud : MonoBehaviour
 
         // ── Grab input: controller grip OR pinch-while-NOT-hovering ─
         // Pinch while hovering = click (handled above), so a pinch reaching here means empty space.
-        bool rGrip = rControllerGrip || rIndexPinch;
-        bool lGrip = lControllerGrip || lIndexPinch;
+        bool rGrip = (rControllerGrip || rIndexPinch) && isMovementEnabled;
+        bool lGrip = (lControllerGrip || lIndexPinch) && isMovementEnabled;
 
         Vector3    rPos = rightAnchor ? rightAnchor.position : Vector3.zero;
         Vector3    lPos = leftAnchor  ? leftAnchor.position  : Vector3.zero;
@@ -469,7 +472,7 @@ public class UmapPointCloud : MonoBehaviour
         }
 
         // ── Right joystick Y → fine scale ──────────────────────
-        float joy = OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.RTouch).y;
+        float joy = isMovementEnabled ? OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.RTouch).y : 0f;
         if (Mathf.Abs(joy) > 0.1f)
         {
             float s = Mathf.Clamp(transform.localScale.x * (1f + joy * Time.deltaTime * 1.5f), 0.05f, 10f);

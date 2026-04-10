@@ -34,6 +34,9 @@ public class WatchMenu : MonoBehaviour
     private bool _isLookingAtWatch = false;
     private float _currentAlpha = 0f;
 
+    private UmapPointCloud _pointCloud;
+    private TextMeshProUGUI _toggleMoveText;
+
     void Start()
     {
         _rig = FindFirstObjectByType<OVRCameraRig>();
@@ -42,6 +45,8 @@ public class WatchMenu : MonoBehaviour
             _leftSkel = _rig.leftHandAnchor.GetComponentInChildren<OVRSkeleton>();
             _leftHand = _rig.leftHandAnchor.GetComponentInChildren<OVRHand>();
         }
+
+        _pointCloud = FindFirstObjectByType<UmapPointCloud>();
 
         BuildMenu();
         
@@ -165,14 +170,14 @@ public class WatchMenu : MonoBehaviour
 
         var font = TMP_Settings.defaultFontAsset;
 
-        // 2. Background (Holographic style)
+        // 2. Background (Holographic style matching InfoPanel)
         var bgGo = new GameObject("Background");
         bgGo.transform.SetParent(_panelRT, false);
         var bgRT = bgGo.AddComponent<RectTransform>();
         bgRT.anchorMin = Vector2.zero; bgRT.anchorMax = Vector2.one;
         bgRT.offsetMin = bgRT.offsetMax = Vector2.zero;
         var bgImg = bgGo.AddComponent<Image>();
-        bgImg.color = new Color(0.05f, 0.15f, 0.3f, 0.85f); // Dark blue translucent
+        bgImg.color = new Color(0.05f, 0.07f, 0.15f, 0.97f);
 
         // Optional: Border/glow
         var borderGo = new GameObject("Border");
@@ -181,45 +186,62 @@ public class WatchMenu : MonoBehaviour
         borderRT.anchorMin = Vector2.zero; borderRT.anchorMax = Vector2.one;
         borderRT.offsetMin = borderRT.offsetMax = Vector2.zero;
         var borderImg = borderGo.AddComponent<Image>();
-        borderImg.color = new Color(0.2f, 0.8f, 1f, 0.4f);
-        // Note: In a real project you might use a sprite with borders here.
+        borderImg.color = new Color(0.2f, 0.8f, 1f, 0.2f); // Subtler border
 
         // 3. Header
-        var headerRT = Pin("Header", bgRT, 0f, 50f);
-        headerRT.gameObject.AddComponent<Image>().color = new Color(0.1f, 0.3f, 0.6f, 0.9f);
-        Label(headerRT, font, "SYSTEM MENU", 18f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
-
-        // 4. Dummy Content Buttons
-        float y = -60f;
-        string[] dummyLabels = { "Status", "Inventory", "Map", "Settings" };
+        var headerRT = Pin("Header", bgRT, 0f, 44f);
+        headerRT.gameObject.AddComponent<Image>().color = new Color(0.12f, 0.14f, 0.36f, 1f);
         
-        foreach (string label in dummyLabels)
-        {
-            var btnRT = AbsRow(bgRT, y, 45f, 10f);
-            var btnImg = btnRT.gameObject.AddComponent<Image>();
-            btnImg.color = new Color(0.1f, 0.25f, 0.4f, 0.8f);
-            
-            var btn = btnRT.gameObject.AddComponent<Button>();
-            btn.targetGraphic = btnImg;
-            var colors = btn.colors;
-            colors.highlightedColor = new Color(0.2f, 0.4f, 0.7f, 1f);
-            colors.pressedColor = new Color(0.3f, 0.6f, 1f, 1f);
-            btn.colors = colors;
-            
-            Label(btnRT, font, label, 14f, new Color(0.8f, 0.9f, 1f), FontStyles.Normal, TextAlignmentOptions.Center);
-            
-            y -= 55f;
-        }
+        var titleRT = new GameObject("Title").AddComponent<RectTransform>();
+        titleRT.SetParent(headerRT, false);
+        titleRT.anchorMin = Vector2.zero; titleRT.anchorMax = Vector2.one;
+        titleRT.offsetMin = new Vector2(12f, 0f);
+        titleRT.offsetMax = new Vector2(-12f, 0f);
+        Label(titleRT, font, "SYSTEM MENU", 15f, new Color(0.85f, 0.92f, 1f), FontStyles.Bold, TextAlignmentOptions.MidlineLeft);
+
+        // 4. Content Buttons
+        float y = -50f;
+        Divider(bgRT, y); y -= 10f;
+        
+        // Move Mode Toggle Button
+        var btnRT = AbsRow(bgRT, y, 40f, 12f);
+        var btnImg = btnRT.gameObject.AddComponent<Image>();
+        btnImg.color = new Color(0.10f, 0.12f, 0.26f, 0.9f);
+        
+        var btn = btnRT.gameObject.AddComponent<Button>();
+        btn.targetGraphic = btnImg;
+        var colors = btn.colors;
+        colors.highlightedColor = new Color(0.15f, 0.20f, 0.40f, 1f);
+        colors.pressedColor = new Color(0.20f, 0.25f, 0.50f, 1f);
+        btn.colors = colors;
+        
+        string initialText = (_pointCloud != null && _pointCloud.isMovementEnabled) ? "Move Mode: ON" : "Move Mode: OFF";
+        _toggleMoveText = Label(btnRT, font, initialText, 14f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
+        
+        btn.onClick.AddListener(OnToggleMoveModeClicked);
+        
+        y -= 50f;
+
+        // Settings Button (Dummy)
+        var btnSetRT = AbsRow(bgRT, y, 40f, 12f);
+        var btnSetImg = btnSetRT.gameObject.AddComponent<Image>();
+        btnSetImg.color = new Color(0.10f, 0.12f, 0.26f, 0.9f);
+        var btnSet = btnSetRT.gameObject.AddComponent<Button>();
+        btnSet.targetGraphic = btnSetImg;
+        btnSet.colors = colors;
+        Label(btnSetRT, font, "Settings (WIP)", 14f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
         
         // 5. Footer stats
-        var footerRT = Pin("Footer", bgRT, -panelHeight + 40f, 40f);
+        var footerRT = Pin("Footer", bgRT, -panelHeight + 20f, 20f);
+        Divider(bgRT, -panelHeight + 22f);
+        
         footerRT.anchorMin = new Vector2(0f, 0f);
         footerRT.anchorMax = new Vector2(1f, 0f);
         footerRT.pivot = new Vector2(0.5f, 0f);
         footerRT.anchoredPosition = Vector2.zero;
-        footerRT.gameObject.AddComponent<Image>().color = new Color(0.05f, 0.1f, 0.2f, 0.9f);
-        Label(footerRT, font, "Network: CONNECTED   Battery: 84%", 10f, new Color(0.4f, 0.9f, 0.6f), FontStyles.Normal, TextAlignmentOptions.Center);
-
+        
+        var footerLbl = Label(footerRT, font, "UMAP Viewer", 10f, new Color(0.40f, 0.92f, 0.42f), FontStyles.Normal, TextAlignmentOptions.Center);
+        
         // 6. Projection Line setup
         var lineGo = new GameObject("ProjectionLine");
         lineGo.transform.SetParent(transform, false);
@@ -270,6 +292,21 @@ public class WatchMenu : MonoBehaviour
         poke.InjectOptionalPointableElement(pc);
     }
 
+    // ── Callbacks ────────────────────────────────────────────────────────
+
+    private void OnToggleMoveModeClicked()
+    {
+        if (_pointCloud != null)
+        {
+            _pointCloud.isMovementEnabled = !_pointCloud.isMovementEnabled;
+            
+            if (_toggleMoveText != null)
+            {
+                _toggleMoveText.text = _pointCloud.isMovementEnabled ? "Move Mode: ON" : "Move Mode: OFF";
+            }
+        }
+    }
+
     // ── UI Layout Helpers ────────────────────────────────────────────────
 
     RectTransform Pin(string name, RectTransform parent, float y, float height)
@@ -291,6 +328,18 @@ public class WatchMenu : MonoBehaviour
         rt.pivot = new Vector2(0.5f, 1f);
         rt.sizeDelta = new Vector2(-padding * 2f, height); 
         rt.anchoredPosition = new Vector2(0f, y);
+        return rt;
+    }
+
+    RectTransform Divider(RectTransform parent, float y)
+    {
+        var rt = new GameObject("Div").AddComponent<RectTransform>();
+        rt.SetParent(parent, false);
+        rt.anchorMin = new Vector2(0f, 1f); rt.anchorMax = new Vector2(1f, 1f);
+        rt.pivot = new Vector2(0.5f, 1f);
+        rt.sizeDelta = new Vector2(-24f, 1f);
+        rt.anchoredPosition = new Vector2(0f, y);
+        rt.gameObject.AddComponent<Image>().color = new Color(0.27f, 0.30f, 0.52f, 0.45f);
         return rt;
     }
 
