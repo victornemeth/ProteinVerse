@@ -38,6 +38,9 @@ public class PointInfoPanel : MonoBehaviour
     private RectTransform _domainBarsRT;    // backbone + coloured domain bars
     private RectTransform _domainLegendRT;  // text legend rows
     private RectTransform _proteinsRT;      // protein entry rows
+    private RectTransform _divider2RT;
+    private RectTransform _assocProtSectionRT;
+    private RectTransform _proteinStatusRT;
 
     // ── Close button (for fingertip poke detection) ───────────────
     private Transform _closeBtnTransform;
@@ -380,6 +383,11 @@ public class PointInfoPanel : MonoBehaviour
                        $"<color=#6688aa>{db}</color>\n" +
                        $"<size=7><color=#aabbcc>{name}</color></size>";
         }
+        
+        // Update legend height dynamically based on domains count
+        _domainLegendRT.sizeDelta = new Vector2(-24f, domains.Count * 23f);
+        
+        UpdateDynamicLayout();
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -407,7 +415,10 @@ public class PointInfoPanel : MonoBehaviour
         _proteinStatus.gameObject.SetActive(false);
 
         var font  = TMP_Settings.defaultFontAsset;
-        int  show = Mathf.Min(proteins.Count, 5);
+        int  show = proteins.Count;
+
+        _proteinsRT.sizeDelta = new Vector2(-24f, show * 34f);
+        UpdateDynamicLayout();
 
         for (int i = 0; i < show; i++)
         {
@@ -439,22 +450,34 @@ public class PointInfoPanel : MonoBehaviour
             txt.text = $"<b><color=#aaddff>{src}</color></b>  {nm}\n" +
                        $"<size=7.5><color=#7799aa>{phg}</color>  <color=#88bbaa>{typ}</color></size>";
         }
+    }
 
-        if (proteins.Count > show)
-        {
-            var moreRT = MakeChild("More", _proteinsRT);
-            moreRT.anchorMin = new Vector2(0f, 1f); moreRT.anchorMax = new Vector2(1f, 1f);
-            moreRT.pivot     = new Vector2(0.5f, 1f);
-            moreRT.sizeDelta = new Vector2(0f, 16f);
-            moreRT.anchoredPosition = new Vector2(0f, -show * 34f);
-            var moreTxt = moreRT.gameObject.AddComponent<TextMeshProUGUI>();
-            moreTxt.font = TMP_Settings.defaultFontAsset;
-            moreTxt.fontSize = 8f;
-            moreTxt.color = new Color(0.5f, 0.65f, 0.85f);
-            moreTxt.alignment = TextAlignmentOptions.Center;
-            moreTxt.raycastTarget = false;
-            moreTxt.text = $"+ {proteins.Count - show} more";
-        }
+    // ─────────────────────────────────────────────────────────────
+    //  Dynamic Layout Update
+    // ─────────────────────────────────────────────────────────────
+
+    void UpdateDynamicLayout()
+    {
+        if (_domainLegendRT == null || _divider2RT == null || _assocProtSectionRT == null || _proteinStatusRT == null || _proteinsRT == null) return;
+
+        float y = _domainLegendRT.anchoredPosition.y; // Start below domain bars
+        y -= _domainLegendRT.sizeDelta.y;
+        
+        y -= 2f; // spacing
+        _divider2RT.anchoredPosition = new Vector2(0f, y);
+        y -= 6f; // spacing
+        
+        y -= 2f;
+        _assocProtSectionRT.anchoredPosition = new Vector2(0f, y);
+        y -= 18f;
+
+        _proteinStatusRT.anchoredPosition = new Vector2(0f, y);
+        _proteinsRT.anchoredPosition = new Vector2(0f, y);
+        y -= _proteinsRT.sizeDelta.y;
+
+        // Update content container height
+        var contentRT = (RectTransform)_domainLegendRT.parent;
+        contentRT.sizeDelta = new Vector2(0f, -y + 20f);
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -514,39 +537,72 @@ public class PointInfoPanel : MonoBehaviour
         var cbXRT = Stretch("X", cbRT.transform);
         Label(cbXRT, font, "✕", 18f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
 
+        // ── Scroll View Setup ─────────────────────────────────────
+        var scrollViewRT = new GameObject("ScrollView").AddComponent<RectTransform>();
+        scrollViewRT.SetParent(bg, false);
+        scrollViewRT.anchorMin = new Vector2(0f, 0f);
+        scrollViewRT.anchorMax = new Vector2(1f, 1f);
+        scrollViewRT.offsetMin = new Vector2(0f, 24f); // Leave room for footer
+        scrollViewRT.offsetMax = new Vector2(0f, -44f); // Leave room for header
+
+        var viewportRT = new GameObject("Viewport").AddComponent<RectTransform>();
+        viewportRT.SetParent(scrollViewRT, false);
+        viewportRT.anchorMin = Vector2.zero; viewportRT.anchorMax = Vector2.one;
+        viewportRT.offsetMin = viewportRT.offsetMax = Vector2.zero;
+        viewportRT.gameObject.AddComponent<RectMask2D>();
+
+        var contentRT = new GameObject("Content").AddComponent<RectTransform>();
+        contentRT.SetParent(viewportRT, false);
+        contentRT.anchorMin = new Vector2(0f, 1f); contentRT.anchorMax = new Vector2(1f, 1f);
+        contentRT.pivot = new Vector2(0.5f, 1f);
+        contentRT.anchoredPosition = Vector2.zero;
+        var contentImg = contentRT.gameObject.AddComponent<Image>();
+        contentImg.color = new Color(0, 0, 0, 0); // Transparent background to catch drag events
+
+        var scrollRect = scrollViewRT.gameObject.AddComponent<ScrollRect>();
+        scrollRect.content = contentRT;
+        scrollRect.viewport = viewportRT;
+        scrollRect.horizontal = false;
+        scrollRect.vertical = true;
+        scrollRect.scrollSensitivity = 20f;
+        // Optional: add inertia, movement type
+        scrollRect.movementType = ScrollRect.MovementType.Elastic;
+        scrollRect.inertia = true;
+        scrollRect.decelerationRate = 0.135f;
+
         // ── Content: track Y from top (negative = downward)
-        float y = -44f;
+        float y = -10f;
 
         // Source ID ──────────────────────────────────────────────
         y -= 8f;
-        var sidRT = AbsRow(bg, y, 22f);
+        var sidRT = AbsRow(contentRT, y, 22f);
         _sourceIdText = Label(sidRT, font, "—", 12f, Color.white, FontStyles.Bold, TextAlignmentOptions.MidlineLeft);
         y -= 22f;
 
-        Divider(bg, y -= 4f); y -= 5f;
+        Divider(contentRT, y -= 4f); y -= 5f;
 
         // Properties ─────────────────────────────────────────────
-        SectionHead(bg, y -= 2f, "PROPERTIES", font); y -= 16f;
+        SectionHead(contentRT, y -= 2f, "PROPERTIES", font); y -= 16f;
 
-        (_lengthVal, _mwVal)   = StatRow(bg, y, font, "Length",        "Mol. Weight"); y -= 28f;
-        (_piVal,    _hydroVal) = StatRow(bg, y, font, "pI",            "Hydropathy");  y -= 28f;
-        (_aromVal,  _sourceVal)= StatRow(bg, y, font, "Aromaticity",   "Source");      y -= 28f;
+        (_lengthVal, _mwVal)   = StatRow(contentRT, y, font, "Length",        "Mol. Weight"); y -= 28f;
+        (_piVal,    _hydroVal) = StatRow(contentRT, y, font, "pI",            "Hydropathy");  y -= 28f;
+        (_aromVal,  _sourceVal)= StatRow(contentRT, y, font, "Aromaticity",   "Source");      y -= 28f;
 
-        Divider(bg, y -= 4f); y -= 6f;
+        Divider(contentRT, y -= 4f); y -= 6f;
 
         // Domain architecture ─────────────────────────────────────
-        SectionHead(bg, y -= 2f, "DOMAIN ARCHITECTURE", font); y -= 18f;
+        SectionHead(contentRT, y -= 2f, "DOMAIN ARCHITECTURE", font); y -= 18f;
 
         // Bars container (backbone + domain bars)
-        _domainBarsRT = AbsRow(bg, y, 28f);
+        _domainBarsRT = AbsRow(contentRT, y, 28f);
         // Status overlay (hidden once bars populate)
-        var dsRT = AbsRow(bg, y, 28f);
+        var dsRT = AbsRow(contentRT, y, 28f);
         _domainStatus = Label(dsRT, font, "Loading…", 9f, new Color(0.60f, 0.72f, 0.92f), FontStyles.Normal, TextAlignmentOptions.Center);
         y -= 30f;
 
         // Legend container
         var legRT = new GameObject("DomLegend").AddComponent<RectTransform>();
-        legRT.SetParent(bg, false);
+        legRT.SetParent(contentRT, false);
         legRT.anchorMin = new Vector2(0f, 1f); legRT.anchorMax = new Vector2(1f, 1f);
         legRT.pivot = new Vector2(0.5f, 1f);
         legRT.sizeDelta = new Vector2(-24f, 100f);
@@ -554,16 +610,16 @@ public class PointInfoPanel : MonoBehaviour
         _domainLegendRT = legRT;
         y -= 102f;
 
-        Divider(bg, y -= 2f); y -= 6f;
+        _divider2RT = Divider(contentRT, y -= 2f); y -= 6f;
 
-        // Associated proteins ─────────────────────────────────────
-        SectionHead(bg, y -= 2f, "ASSOCIATED PROTEINS", font); y -= 18f;
+        // Associated Proteins ─────────────────────────────────────
+        _assocProtSectionRT = SectionHead(contentRT, y -= 2f, "ASSOCIATED PROTEINS", font); y -= 18f;
 
-        var psRT = AbsRow(bg, y, 20f);
-        _proteinStatus = Label(psRT, font, "Loading…", 9f, new Color(0.60f, 0.72f, 0.92f), FontStyles.Normal, TextAlignmentOptions.Center);
+        _proteinStatusRT = AbsRow(contentRT, y, 20f);
+        _proteinStatus = Label(_proteinStatusRT, font, "Loading…", 9f, new Color(0.60f, 0.72f, 0.92f), FontStyles.Normal, TextAlignmentOptions.Center);
 
         var protRT = new GameObject("ProtList").AddComponent<RectTransform>();
-        protRT.SetParent(bg, false);
+        protRT.SetParent(contentRT, false);
         protRT.anchorMin = new Vector2(0f, 1f); protRT.anchorMax = new Vector2(1f, 1f);
         protRT.pivot = new Vector2(0.5f, 1f);
         protRT.sizeDelta = new Vector2(-24f, 180f);
@@ -571,8 +627,11 @@ public class PointInfoPanel : MonoBehaviour
         _proteinsRT = protRT;
         y -= 182f;
 
+        // Adjust content height based on total items
+        contentRT.sizeDelta = new Vector2(0f, -y + 20f);
+
         // UMAP footer ─────────────────────────────────────────────
-        Divider(bg, y -= 2f);
+        Divider(bg, -H + 26f);
         var umapRT = new GameObject("UMAP").AddComponent<RectTransform>();
         umapRT.SetParent(bg, false);
         umapRT.anchorMin = new Vector2(0f, 0f); umapRT.anchorMax = new Vector2(1f, 0f);
@@ -668,7 +727,7 @@ public class PointInfoPanel : MonoBehaviour
         return (lvT, rvT);
     }
 
-    void SectionHead(RectTransform parent, float y, string text, TMP_FontAsset font)
+    RectTransform SectionHead(RectTransform parent, float y, string text, TMP_FontAsset font)
     {
         var rt = AbsRow(parent, y, 14f, padding: 12f);
         var tmp = rt.gameObject.AddComponent<TextMeshProUGUI>();
@@ -677,9 +736,10 @@ public class PointInfoPanel : MonoBehaviour
         tmp.characterSpacing = 2f;
         tmp.alignment = TextAlignmentOptions.MidlineLeft; tmp.raycastTarget = false;
         tmp.text = text;
+        return rt;
     }
 
-    void Divider(RectTransform parent, float y)
+    RectTransform Divider(RectTransform parent, float y)
     {
         var rt = new GameObject("Div").AddComponent<RectTransform>();
         rt.SetParent(parent, false);
@@ -688,6 +748,7 @@ public class PointInfoPanel : MonoBehaviour
         rt.sizeDelta = new Vector2(-24f, 1f);
         rt.anchoredPosition = new Vector2(0f, y);
         rt.gameObject.AddComponent<Image>().color = new Color(0.27f, 0.30f, 0.52f, 0.45f);
+        return rt;
     }
 
     // Horizontal strip anchored to top at a given y position
