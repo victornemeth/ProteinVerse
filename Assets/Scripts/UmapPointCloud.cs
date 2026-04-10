@@ -351,6 +351,12 @@ public class UmapPointCloud : MonoBehaviour
         bool rControllerGrip = OVRInput.Get(OVRInput.Button.PrimaryHandTrigger, OVRInput.Controller.RTouch);
         bool lControllerGrip = OVRInput.Get(OVRInput.Button.PrimaryHandTrigger, OVRInput.Controller.LTouch);
 
+        // If holding controller grips, immediately activate move mode implicitly
+        if (rControllerGrip || lControllerGrip)
+        {
+            isMovementEnabled = true;
+        }
+
         bool rIndexPinch = rightHand != null && rightHand.GetFingerIsPinching(OVRHand.HandFinger.Index);
         bool lIndexPinch = leftHand  != null && leftHand.GetFingerIsPinching(OVRHand.HandFinger.Index);
 
@@ -366,7 +372,7 @@ public class UmapPointCloud : MonoBehaviour
         // ── Click detection ─────────────────────────────────────
         // For controllers: index trigger fires a click.
         // For hands: a pinch-start while a point is hovered fires a click (NOT a grab).
-        bool clickFired = !isMovementEnabled && (rTriggerDown || (rPinchDown && hoveredIndex >= 0));
+        bool clickFired = (!isMovementEnabled) && (rTriggerDown || (rPinchDown && hoveredIndex >= 0));
 
         if (clickFired)
         {

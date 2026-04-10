@@ -10,14 +10,14 @@ public class WatchMenu : MonoBehaviour
 {
     // ── Configuration ────────────────────────────────────────────────
     [Header("Menu Appearance")]
-    public float panelWidth = 300f;
-    public float panelHeight = 400f;
+    public float panelWidth = 200f;
+    public float panelHeight = 120f;
     [Tooltip("Overall scale of the menu in the world. Reduce this to make everything (including fonts) smaller.")]
-    public float globalScale = 0.0002f; // 5x smaller than 0.001, makes a 300x400 canvas be 6cm x 8cm in world space
+    public float globalScale = 0.0003f; // 3x smaller than 0.001, clear text on a small physical panel
     [Tooltip("Offset relative to the watch anchor point on the wrist/arm")]
-    public Vector3 menuOffset = new Vector3(0.0f, 0.12f, 0.0f); // Positioned directly 12cm above the arm anchor
+    public Vector3 menuOffset = new Vector3(0.0f, 0.02f, 0.0f); // Positioned directly 2cm above the arm anchor
     public float transitionSpeed = 10f;
-    
+
     [Header("Detection Thresholds")]
     [Tooltip("How directly the watch needs to face the camera to appear (0 to 1)")]
     public float facingThreshold = 0.5f;
@@ -29,7 +29,6 @@ public class WatchMenu : MonoBehaviour
     
     private CanvasGroup _canvasGroup;
     private RectTransform _panelRT;
-    private LineRenderer _projectionLine;
     
     private bool _isLookingAtWatch = false;
     private float _currentAlpha = 0f;
@@ -54,11 +53,19 @@ public class WatchMenu : MonoBehaviour
         _canvasGroup.alpha = 0f;
         _currentAlpha = 0f;
         _panelRT.localScale = Vector3.zero;
-        _projectionLine.enabled = false;
     }
 
     void Update()
     {
+        if (_pointCloud != null && _toggleMoveText != null)
+        {
+            string expectedText = _pointCloud.isMovementEnabled ? "Move Mode: ON" : "Move Mode: OFF";
+            if (_toggleMoveText.text != expectedText)
+            {
+                _toggleMoveText.text = expectedText;
+            }
+        }
+
         if (_rig == null || _leftSkel == null || !_leftSkel.IsInitialized || _leftHand == null || !_leftHand.IsTracked)
         {
             // If hand is not tracked, smoothly hide the menu
@@ -66,27 +73,15 @@ public class WatchMenu : MonoBehaviour
             return;
         }
 
-        // Get the wrist and forearm bones
+        // Get the wrist bone
         var wristBone = GetBone(_leftSkel, OVRSkeleton.BoneId.Hand_WristRoot);
-        var forearmBone = GetBone(_leftSkel, OVRSkeleton.BoneId.Hand_ForearmStub);
         
         if (wristBone == null) return;
 
         // Determine the actual "watch" base point.
         // Hand_WristRoot is exactly at the hand/wrist joint. 
-        // A watch sits slightly further back on the arm (forearm).
-        // If the forearm bone exists, we can interpolate. Otherwise, push it back along the wrist's backward axis.
-        Vector3 anchorPosition = wristBone.Transform.position;
-        if (forearmBone != null)
-        {
-            // Position halfway between wrist joint and the forearm stub
-            anchorPosition = Vector3.Lerp(wristBone.Transform.position, forearmBone.Transform.position, 0.4f);
-        }
-        else
-        {
-            // Fallback: move 6cm down the arm (assuming Z forward points to fingers)
-            anchorPosition -= wristBone.Transform.forward * 0.06f; 
-        }
+        // We move 8cm down the arm (assuming -forward is towards the elbow for OVRHand)
+        Vector3 anchorPosition = wristBone.Transform.position - wristBone.Transform.forward * 0.08f; 
 
         // Approximate the watch face normal (up on the back of the hand/wrist)
         Vector3 watchNormal = wristBone.Transform.up; 
@@ -117,7 +112,6 @@ public class WatchMenu : MonoBehaviour
         if (_canvasGroup.gameObject.activeSelf != isVisibleThreshold)
         {
             _canvasGroup.gameObject.SetActive(isVisibleThreshold);
-            _projectionLine.enabled = isVisibleThreshold;
         }
 
         if (isVisibleThreshold && wristTransform != null)
@@ -136,17 +130,10 @@ public class WatchMenu : MonoBehaviour
             _panelRT.position = targetPosition;
             if (lookDir != Vector3.zero)
             {
-                _panelRT.rotation = Quaternion.LookRotation(lookDir, Vector3.up);
+                // Look at the camera, but lock the "Up" vector to the wrist's "Up" vector.
+                // This makes it twist naturally with your arm instead of purely billboarding!
+                _panelRT.rotation = Quaternion.LookRotation(lookDir, wristTransform.up);
             }
-
-            // Update projection line: from the arm anchor to the bottom of the holographic panel
-            _projectionLine.SetPosition(0, anchorPosition);
-            _projectionLine.SetPosition(1, _panelRT.position - _panelRT.up * (panelHeight * globalScale * 0.5f)); 
-            
-            // Fade line with panel
-            Color lineColor = new Color(0.2f, 0.8f, 1f, _currentAlpha * 0.5f);
-            _projectionLine.startColor = lineColor;
-            _projectionLine.endColor = new Color(0.2f, 0.8f, 1f, 0f); // Fade out towards menu
         }
     }
 
@@ -204,7 +191,7 @@ public class WatchMenu : MonoBehaviour
         borderImg.raycastTarget = false; // Prevent blocking pokes
 
         // 3. Header
-        var headerRT = Pin("Header", bgRT, 0f, 44f);
+        var headerRT = Pin("Header", bgRT, 0f, 30f);
         var headerImg = headerRT.gameObject.AddComponent<Image>();
         headerImg.color = new Color(0.12f, 0.14f, 0.36f, 1f);
         headerImg.raycastTarget = false; // Prevent blocking pokes
@@ -214,14 +201,14 @@ public class WatchMenu : MonoBehaviour
         titleRT.anchorMin = Vector2.zero; titleRT.anchorMax = Vector2.one;
         titleRT.offsetMin = new Vector2(12f, 0f);
         titleRT.offsetMax = new Vector2(-12f, 0f);
-        Label(titleRT, font, "SYSTEM MENU", 15f, new Color(0.85f, 0.92f, 1f), FontStyles.Bold, TextAlignmentOptions.MidlineLeft);
+        Label(titleRT, font, "WATCH UI", 12f, new Color(0.85f, 0.92f, 1f), FontStyles.Bold, TextAlignmentOptions.Center);
 
         // 4. Content Buttons
-        float y = -50f;
+        float y = -30f;
         Divider(bgRT, y); y -= 10f;
         
         // Move Mode Toggle Button
-        var btnRT = AbsRow(bgRT, y, 60f, 12f); // Taller button so it's easier to hit
+        var btnRT = AbsRow(bgRT, -50f, 60f, 12f); // Taller button centered
         var btnImg = btnRT.gameObject.AddComponent<Image>();
         btnImg.color = new Color(0.10f, 0.12f, 0.26f, 0.9f);
         btnImg.raycastTarget = true; // Ensure this catches the poke
@@ -237,43 +224,6 @@ public class WatchMenu : MonoBehaviour
         _toggleMoveText = Label(btnRT, font, initialText, 16f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center); // Larger text
         
         btn.onClick.AddListener(OnToggleMoveModeClicked);
-        
-        y -= 70f;
-
-        // Settings Button (Dummy)
-        var btnSetRT = AbsRow(bgRT, y, 60f, 12f); // Taller button
-        var btnSetImg = btnSetRT.gameObject.AddComponent<Image>();
-        btnSetImg.color = new Color(0.10f, 0.12f, 0.26f, 0.9f);
-        btnSetImg.raycastTarget = true;
-        var btnSet = btnSetRT.gameObject.AddComponent<Button>();
-        btnSet.targetGraphic = btnSetImg;
-        btnSet.colors = colors;
-        Label(btnSetRT, font, "Settings (WIP)", 14f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
-        
-        // 5. Footer stats
-        var footerRT = Pin("Footer", bgRT, -panelHeight + 20f, 20f);
-        Divider(bgRT, -panelHeight + 22f);
-        
-        footerRT.anchorMin = new Vector2(0f, 0f);
-        footerRT.anchorMax = new Vector2(1f, 0f);
-        footerRT.pivot = new Vector2(0.5f, 0f);
-        footerRT.anchoredPosition = Vector2.zero;
-        var footerImg = footerRT.gameObject.AddComponent<Image>();
-        footerImg.color = new Color(0.05f, 0.1f, 0.2f, 0.9f);
-        footerImg.raycastTarget = false; // Prevent blocking pokes
-        
-        var footerLbl = Label(footerRT, font, "UMAP Viewer", 10f, new Color(0.40f, 0.92f, 0.42f), FontStyles.Normal, TextAlignmentOptions.Center);
-        
-        // 6. Projection Line setup
-        var lineGo = new GameObject("ProjectionLine");
-        lineGo.transform.SetParent(transform, false);
-        _projectionLine = lineGo.AddComponent<LineRenderer>();
-        _projectionLine.useWorldSpace = true;
-        _projectionLine.startWidth = 0.0005f;
-        _projectionLine.endWidth = 0.002f;
-        _projectionLine.positionCount = 2;
-        // Basic line material (can be upgraded in editor)
-        _projectionLine.material = new Material(Shader.Find("Sprites/Default"));
     }
 
     void EnsureEventSystemHasPointableCanvasModule()
