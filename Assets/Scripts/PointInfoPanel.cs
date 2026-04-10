@@ -168,13 +168,18 @@ public class PointInfoPanel : MonoBehaviour
 
         if (camera != null)
         {
-            // Project forward onto the horizontal plane so panel stays upright
+            // Project camera forward onto horizontal plane
             Vector3 forward = Vector3.ProjectOnPlane(camera.forward, Vector3.up);
             if (forward.sqrMagnitude < 0.01f) forward = Vector3.forward;
             forward.Normalize();
 
-            transform.position = camera.position + forward * 0.65f + Vector3.up * -0.05f;
-            transform.rotation = Quaternion.LookRotation(forward, Vector3.up);
+            // Control-panel position: close, low, angled up toward the headset
+            Vector3 spawnPos = camera.position + forward * 0.45f + Vector3.up * -0.40f;
+            transform.position = spawnPos;
+
+            // Tilt toward headset: panel normal points from panel up toward the camera
+            Vector3 toCamera = (camera.position - spawnPos).normalized;
+            transform.rotation = Quaternion.LookRotation(-toCamera, Vector3.up);
         }
 
         gameObject.SetActive(true);
