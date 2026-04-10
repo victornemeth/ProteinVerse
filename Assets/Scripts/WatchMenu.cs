@@ -14,8 +14,8 @@ public class WatchMenu : MonoBehaviour
     public float panelHeight = 400f;
     [Tooltip("Overall scale of the menu in the world. Reduce this to make everything (including fonts) smaller.")]
     public float globalScale = 0.0002f; // 5x smaller than 0.001, makes a 300x400 canvas be 6cm x 8cm in world space
-    [Tooltip("Offset relative to the wrist bone")]
-    public Vector3 menuOffset = new Vector3(-0.05f, 0.15f, 0.05f); 
+    [Tooltip("Offset relative to the watch anchor point on the wrist/arm")]
+    public Vector3 menuOffset = new Vector3(0.0f, 0.12f, 0.0f); // Positioned directly 12cm above the arm anchor
     public float transitionSpeed = 10f;
     
     [Header("Detection Thresholds")]
@@ -62,34 +62,47 @@ public class WatchMenu : MonoBehaviour
         if (_rig == null || _leftSkel == null || !_leftSkel.IsInitialized || _leftHand == null || !_leftHand.IsTracked)
         {
             // If hand is not tracked, smoothly hide the menu
-            UpdateMenuVisibility(false, null);
+            UpdateMenuVisibility(false, null, Vector3.zero);
             return;
         }
 
-        // Get the wrist bone
+        // Get the wrist and forearm bones
         var wristBone = GetBone(_leftSkel, OVRSkeleton.BoneId.Hand_WristRoot);
-        var middleMetacarpal = GetBone(_leftSkel, OVRSkeleton.BoneId.Hand_Middle1);
+        var forearmBone = GetBone(_leftSkel, OVRSkeleton.BoneId.Hand_ForearmStub);
         
         if (wristBone == null) return;
 
-        // Calculate "Up" direction of the watch (usually the back of the hand)
-        // For Meta Quest hands, back of the left hand is usually roughly the -Up or -Forward of the wrist bone,
-        // but it can vary. A robust way is cross product of fingers, or just using palm normal negated.
-        // Let's approximate the watch face normal:
+        // Determine the actual "watch" base point.
+        // Hand_WristRoot is exactly at the hand/wrist joint. 
+        // A watch sits slightly further back on the arm (forearm).
+        // If the forearm bone exists, we can interpolate. Otherwise, push it back along the wrist's backward axis.
+        Vector3 anchorPosition = wristBone.Transform.position;
+        if (forearmBone != null)
+        {
+            // Position halfway between wrist joint and the forearm stub
+            anchorPosition = Vector3.Lerp(wristBone.Transform.position, forearmBone.Transform.position, 0.4f);
+        }
+        else
+        {
+            // Fallback: move 6cm down the arm (assuming Z forward points to fingers)
+            anchorPosition -= wristBone.Transform.forward * 0.06f; 
+        }
+
+        // Approximate the watch face normal (up on the back of the hand/wrist)
         Vector3 watchNormal = wristBone.Transform.up; 
         
         // Vector from watch to camera
         Vector3 cameraPos = _rig.centerEyeAnchor.position;
-        Vector3 watchToCamera = (cameraPos - wristBone.Transform.position).normalized;
+        Vector3 watchToCamera = (cameraPos - anchorPosition).normalized;
 
         // Calculate if the user is looking at the watch
         float dotProduct = Vector3.Dot(watchNormal, watchToCamera);
         _isLookingAtWatch = dotProduct > facingThreshold;
 
-        UpdateMenuVisibility(_isLookingAtWatch, wristBone.Transform);
+        UpdateMenuVisibility(_isLookingAtWatch, wristBone.Transform, anchorPosition);
     }
 
-    void UpdateMenuVisibility(bool visible, Transform wristTransform)
+    void UpdateMenuVisibility(bool visible, Transform wristTransform, Vector3 anchorPosition)
     {
         // Smooth transition for alpha only
         float targetAlpha = visible ? 1f : 0f;
@@ -109,8 +122,8 @@ public class WatchMenu : MonoBehaviour
 
         if (isVisibleThreshold && wristTransform != null)
         {
-            // Position the menu relative to the wrist
-            Vector3 targetPosition = wristTransform.position 
+            // Position the menu relative to the calculated watch anchor point
+            Vector3 targetPosition = anchorPosition 
                                    + wristTransform.right * menuOffset.x 
                                    + wristTransform.up * menuOffset.y 
                                    + wristTransform.forward * menuOffset.z;
@@ -119,18 +132,16 @@ public class WatchMenu : MonoBehaviour
             Vector3 cameraPos = _rig.centerEyeAnchor.position;
             Vector3 lookDir = targetPosition - cameraPos;
             
-            // Snap exactly to position and rotation. Lerping position causes the menu 
-            // to lag behind the wrist, making the poke surface run away from the finger
-            // and causing the Interaction SDK to reject the poke collision.
+            // Snap exactly to position and rotation
             _panelRT.position = targetPosition;
             if (lookDir != Vector3.zero)
             {
                 _panelRT.rotation = Quaternion.LookRotation(lookDir, Vector3.up);
             }
 
-            // Update projection line
-            _projectionLine.SetPosition(0, wristTransform.position);
-            _projectionLine.SetPosition(1, _panelRT.position - _panelRT.up * (panelHeight * globalScale * 0.5f)); // Bottom of the panel
+            // Update projection line: from the arm anchor to the bottom of the holographic panel
+            _projectionLine.SetPosition(0, anchorPosition);
+            _projectionLine.SetPosition(1, _panelRT.position - _panelRT.up * (panelHeight * globalScale * 0.5f)); 
             
             // Fade line with panel
             Color lineColor = new Color(0.2f, 0.8f, 1f, _currentAlpha * 0.5f);
