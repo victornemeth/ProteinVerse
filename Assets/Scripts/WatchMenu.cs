@@ -91,14 +91,14 @@ public class WatchMenu : MonoBehaviour
 
     void UpdateMenuVisibility(bool visible, Transform wristTransform)
     {
-        // Smooth transition
+        // Smooth transition for alpha only
         float targetAlpha = visible ? 1f : 0f;
-        _currentAlpha = Mathf.Lerp(_currentAlpha, targetAlpha, Time.deltaTime * transitionSpeed);
+        _currentAlpha = Mathf.MoveTowards(_currentAlpha, targetAlpha, Time.deltaTime * transitionSpeed);
         
         _canvasGroup.alpha = _currentAlpha;
-        _panelRT.localScale = Vector3.one * Mathf.Lerp(globalScale * 0.5f, globalScale, _currentAlpha);
+        _panelRT.localScale = Vector3.one * globalScale; // DO NOT animate scale! It breaks Poke interaction bounds.
 
-        bool isVisibleThreshold = _currentAlpha > 0.05f;
+        bool isVisibleThreshold = _currentAlpha > 0.01f;
         
         // Enable/disable rendering components to save performance when hidden
         if (_canvasGroup.gameObject.activeSelf != isVisibleThreshold)
@@ -119,11 +119,13 @@ public class WatchMenu : MonoBehaviour
             Vector3 cameraPos = _rig.centerEyeAnchor.position;
             Vector3 lookDir = targetPosition - cameraPos;
             
-            _panelRT.position = Vector3.Lerp(_panelRT.position, targetPosition, Time.deltaTime * transitionSpeed);
+            // Snap exactly to position and rotation. Lerping position causes the menu 
+            // to lag behind the wrist, making the poke surface run away from the finger
+            // and causing the Interaction SDK to reject the poke collision.
+            _panelRT.position = targetPosition;
             if (lookDir != Vector3.zero)
             {
-                Quaternion targetRot = Quaternion.LookRotation(lookDir, Vector3.up);
-                _panelRT.rotation = Quaternion.Slerp(_panelRT.rotation, targetRot, Time.deltaTime * transitionSpeed);
+                _panelRT.rotation = Quaternion.LookRotation(lookDir, Vector3.up);
             }
 
             // Update projection line
@@ -276,15 +278,13 @@ public class WatchMenu : MonoBehaviour
 
         var surfGO = new GameObject("PokeSurface");
         surfGO.transform.SetParent(pokeGO.transform, false);
-        // Leave localScale as 1 to avoid making the surface bounds infinitely thin due to the globalScale
-        surfGO.transform.localScale = Vector3.one;
+        surfGO.transform.localScale = new Vector3(1f, 1f, 0.001f);
 
         var plane = surfGO.AddComponent<PlaneSurface>();
         plane.InjectAllPlaneSurface(PlaneSurface.NormalFacing.Backward, true);
 
         var clip = surfGO.AddComponent<BoundsClipper>();
-        // Massive Z size ensures the finger won't skip through the clipping bounds in a single frame
-        clip.Size = new Vector3(panelWidth, panelHeight, 50000f);
+        clip.Size = new Vector3(panelWidth, panelHeight, 10f);
 
         var cps = surfGO.AddComponent<ClippedPlaneSurface>();
         cps.InjectAllClippedPlaneSurface(plane, new IBoundsClipper[] { clip });
