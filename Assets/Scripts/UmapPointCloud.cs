@@ -99,6 +99,7 @@ public class UmapPointCloud : MonoBehaviour
 
     [Header("Interaction")]
     public bool isMovementEnabled = false;
+    private bool wasControllerGrab = false;
 
     private enum GrabState { None, Right, Left, Both }
     private GrabState currentGrabState = GrabState.None;
@@ -354,7 +355,16 @@ public class UmapPointCloud : MonoBehaviour
         // If holding controller grips, immediately activate move mode implicitly
         if (rControllerGrip || lControllerGrip)
         {
-            isMovementEnabled = true;
+            if (!wasControllerGrab)
+            {
+                isMovementEnabled = true;
+                wasControllerGrab = true;
+            }
+        }
+        else if (wasControllerGrab)
+        {
+            isMovementEnabled = false;
+            wasControllerGrab = false;
         }
 
         bool rIndexPinch = rightHand != null && rightHand.GetFingerIsPinching(OVRHand.HandFinger.Index);

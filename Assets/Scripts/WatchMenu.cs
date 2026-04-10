@@ -15,7 +15,9 @@ public class WatchMenu : MonoBehaviour
     [Tooltip("Overall scale of the menu in the world. Reduce this to make everything (including fonts) smaller.")]
     public float globalScale = 0.0003f; // 3x smaller than 0.001, clear text on a small physical panel
     [Tooltip("Offset relative to the watch anchor point on the wrist/arm")]
-    public Vector3 menuOffset = new Vector3(0.0f, 0.02f, 0.0f); // Positioned directly 2cm above the arm anchor
+    public Vector3 menuOffset = new Vector3(-0.02f, 0.03f, -0.05f); // Shift slightly left, up from skin, back towards elbow
+    [Tooltip("Rotation offset relative to the wrist bone")]
+    public Vector3 menuRotationOffset = new Vector3(0f, -90f, 0f); // Rotate to face outward on left wrist
     public float transitionSpeed = 10f;
 
     [Header("Detection Thresholds")]
@@ -79,9 +81,7 @@ public class WatchMenu : MonoBehaviour
         if (wristBone == null) return;
 
         // Determine the actual "watch" base point.
-        // Hand_WristRoot is exactly at the hand/wrist joint. 
-        // We move 8cm down the arm (assuming -forward is towards the elbow for OVRHand)
-        Vector3 anchorPosition = wristBone.Transform.position - wristBone.Transform.forward * 0.08f; 
+        Vector3 anchorPosition = wristBone.Transform.position;
 
         // Approximate the watch face normal (up on the back of the hand/wrist)
         Vector3 watchNormal = wristBone.Transform.up; 
@@ -122,18 +122,10 @@ public class WatchMenu : MonoBehaviour
                                    + wristTransform.up * menuOffset.y 
                                    + wristTransform.forward * menuOffset.z;
             
-            // Make the panel face the camera
-            Vector3 cameraPos = _rig.centerEyeAnchor.position;
-            Vector3 lookDir = targetPosition - cameraPos;
-            
-            // Snap exactly to position and rotation
+            // Snap exactly to position and firmly lock rotation to the wrist!
+            // No billboarding to camera. It stays rigidly attached to the arm geometry.
             _panelRT.position = targetPosition;
-            if (lookDir != Vector3.zero)
-            {
-                // Look at the camera, but lock the "Up" vector to the wrist's "Up" vector.
-                // This makes it twist naturally with your arm instead of purely billboarding!
-                _panelRT.rotation = Quaternion.LookRotation(lookDir, wristTransform.up);
-            }
+            _panelRT.rotation = wristTransform.rotation * Quaternion.Euler(menuRotationOffset);
         }
     }
 
