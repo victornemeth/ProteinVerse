@@ -180,6 +180,7 @@ public class WatchMenu : MonoBehaviour
         bgRT.offsetMin = bgRT.offsetMax = Vector2.zero;
         var bgImg = bgGo.AddComponent<Image>();
         bgImg.color = new Color(0.05f, 0.07f, 0.15f, 0.97f);
+        bgImg.raycastTarget = false; // Prevent blocking pokes
 
         // Optional: Border/glow
         var borderGo = new GameObject("Border");
@@ -189,10 +190,13 @@ public class WatchMenu : MonoBehaviour
         borderRT.offsetMin = borderRT.offsetMax = Vector2.zero;
         var borderImg = borderGo.AddComponent<Image>();
         borderImg.color = new Color(0.2f, 0.8f, 1f, 0.2f); // Subtler border
+        borderImg.raycastTarget = false; // Prevent blocking pokes
 
         // 3. Header
         var headerRT = Pin("Header", bgRT, 0f, 44f);
-        headerRT.gameObject.AddComponent<Image>().color = new Color(0.12f, 0.14f, 0.36f, 1f);
+        var headerImg = headerRT.gameObject.AddComponent<Image>();
+        headerImg.color = new Color(0.12f, 0.14f, 0.36f, 1f);
+        headerImg.raycastTarget = false; // Prevent blocking pokes
         
         var titleRT = new GameObject("Title").AddComponent<RectTransform>();
         titleRT.SetParent(headerRT, false);
@@ -206,9 +210,10 @@ public class WatchMenu : MonoBehaviour
         Divider(bgRT, y); y -= 10f;
         
         // Move Mode Toggle Button
-        var btnRT = AbsRow(bgRT, y, 40f, 12f);
+        var btnRT = AbsRow(bgRT, y, 60f, 12f); // Taller button so it's easier to hit
         var btnImg = btnRT.gameObject.AddComponent<Image>();
         btnImg.color = new Color(0.10f, 0.12f, 0.26f, 0.9f);
+        btnImg.raycastTarget = true; // Ensure this catches the poke
         
         var btn = btnRT.gameObject.AddComponent<Button>();
         btn.targetGraphic = btnImg;
@@ -218,16 +223,17 @@ public class WatchMenu : MonoBehaviour
         btn.colors = colors;
         
         string initialText = (_pointCloud != null && _pointCloud.isMovementEnabled) ? "Move Mode: ON" : "Move Mode: OFF";
-        _toggleMoveText = Label(btnRT, font, initialText, 14f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
+        _toggleMoveText = Label(btnRT, font, initialText, 16f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center); // Larger text
         
         btn.onClick.AddListener(OnToggleMoveModeClicked);
         
-        y -= 50f;
+        y -= 70f;
 
         // Settings Button (Dummy)
-        var btnSetRT = AbsRow(bgRT, y, 40f, 12f);
+        var btnSetRT = AbsRow(bgRT, y, 60f, 12f); // Taller button
         var btnSetImg = btnSetRT.gameObject.AddComponent<Image>();
         btnSetImg.color = new Color(0.10f, 0.12f, 0.26f, 0.9f);
+        btnSetImg.raycastTarget = true;
         var btnSet = btnSetRT.gameObject.AddComponent<Button>();
         btnSet.targetGraphic = btnSetImg;
         btnSet.colors = colors;
@@ -241,6 +247,9 @@ public class WatchMenu : MonoBehaviour
         footerRT.anchorMax = new Vector2(1f, 0f);
         footerRT.pivot = new Vector2(0.5f, 0f);
         footerRT.anchoredPosition = Vector2.zero;
+        var footerImg = footerRT.gameObject.AddComponent<Image>();
+        footerImg.color = new Color(0.05f, 0.1f, 0.2f, 0.9f);
+        footerImg.raycastTarget = false; // Prevent blocking pokes
         
         var footerLbl = Label(footerRT, font, "UMAP Viewer", 10f, new Color(0.40f, 0.92f, 0.42f), FontStyles.Normal, TextAlignmentOptions.Center);
         
@@ -284,7 +293,7 @@ public class WatchMenu : MonoBehaviour
         plane.InjectAllPlaneSurface(PlaneSurface.NormalFacing.Backward, true);
 
         var clip = surfGO.AddComponent<BoundsClipper>();
-        clip.Size = new Vector3(panelWidth, panelHeight, 10f);
+        clip.Size = new Vector3(panelWidth, panelHeight, 500f); // Generous 500 depth ensures absolutely no poke skipping
 
         var cps = surfGO.AddComponent<ClippedPlaneSurface>();
         cps.InjectAllClippedPlaneSurface(plane, new IBoundsClipper[] { clip });
@@ -341,7 +350,9 @@ public class WatchMenu : MonoBehaviour
         rt.pivot = new Vector2(0.5f, 1f);
         rt.sizeDelta = new Vector2(-24f, 1f);
         rt.anchoredPosition = new Vector2(0f, y);
-        rt.gameObject.AddComponent<Image>().color = new Color(0.27f, 0.30f, 0.52f, 0.45f);
+        var img = rt.gameObject.AddComponent<Image>();
+        img.color = new Color(0.27f, 0.30f, 0.52f, 0.45f);
+        img.raycastTarget = false; // Extremely important! A 1px line overlaying a button can steal pokes!
         return rt;
     }
 
