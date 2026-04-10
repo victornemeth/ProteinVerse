@@ -10,19 +10,19 @@ public class WatchMenu : MonoBehaviour
 {
     // ── Configuration ────────────────────────────────────────────────
     [Header("Menu Appearance")]
-    public float panelWidth = 200f;
-    public float panelHeight = 120f;
+    public float panelWidth = 140f;
+    public float panelHeight = 160f;
     [Tooltip("Overall scale of the menu in the world. Reduce this to make everything (including fonts) smaller.")]
-    public float globalScale = 0.0003f; // 3x smaller than 0.001, clear text on a small physical panel
-    [Tooltip("Offset relative to the watch anchor point on the wrist/arm")]
-    public Vector3 menuOffset = new Vector3(-0.02f, 0.03f, -0.05f); // Shift slightly left, up from skin, back towards elbow
+    public float globalScale = 0.0004f; // slightly larger text for palm
+    [Tooltip("Offset relative to the wrist bone (moves menu to the palm center)")]
+    public Vector3 menuOffset = new Vector3(0.02f, -0.02f, 0.06f); // Shift into palm: right(thumb-ish), down(out of palm), forward(towards fingers)
     [Tooltip("Rotation offset relative to the wrist bone")]
-    public Vector3 menuRotationOffset = new Vector3(0f, -90f, 0f); // Rotate to face outward on left wrist
+    public Vector3 menuRotationOffset = new Vector3(180f, 0f, 0f); // Flipped 180 to face out of the palm instead of back of hand
     public float transitionSpeed = 10f;
 
     [Header("Detection Thresholds")]
-    [Tooltip("How directly the watch needs to face the camera to appear (0 to 1)")]
-    public float facingThreshold = 0.5f;
+    [Tooltip("How directly the palm needs to face the camera to appear (0 to 1)")]
+    public float facingThreshold = 0.6f;
 
     // ── Internal State ────────────────────────────────────────────────
     private OVRCameraRig _rig;
@@ -80,18 +80,20 @@ public class WatchMenu : MonoBehaviour
         
         if (wristBone == null) return;
 
-        // Determine the actual "watch" base point.
+        // Base anchor point: Wrist joint
+        // The center of the palm is generally slightly forward (towards fingers) and 'down' (out of the palm face)
         Vector3 anchorPosition = wristBone.Transform.position;
 
-        // Approximate the watch face normal (up on the back of the hand/wrist)
-        Vector3 watchNormal = wristBone.Transform.up; 
+        // Approximate the palm normal: Meta Quest usually puts "up" out the back of the hand,
+        // meaning "down" (-up) is straight out of the palm!
+        Vector3 palmNormal = -wristBone.Transform.up; 
         
-        // Vector from watch to camera
+        // Vector from palm to camera
         Vector3 cameraPos = _rig.centerEyeAnchor.position;
-        Vector3 watchToCamera = (cameraPos - anchorPosition).normalized;
+        Vector3 palmToCamera = (cameraPos - anchorPosition).normalized;
 
-        // Calculate if the user is looking at the watch
-        float dotProduct = Vector3.Dot(watchNormal, watchToCamera);
+        // Calculate if the user is looking at their palm
+        float dotProduct = Vector3.Dot(palmNormal, palmToCamera);
         _isLookingAtWatch = dotProduct > facingThreshold;
 
         UpdateMenuVisibility(_isLookingAtWatch, wristBone.Transform, anchorPosition);
@@ -193,7 +195,7 @@ public class WatchMenu : MonoBehaviour
         titleRT.anchorMin = Vector2.zero; titleRT.anchorMax = Vector2.one;
         titleRT.offsetMin = new Vector2(12f, 0f);
         titleRT.offsetMax = new Vector2(-12f, 0f);
-        Label(titleRT, font, "WATCH UI", 12f, new Color(0.85f, 0.92f, 1f), FontStyles.Bold, TextAlignmentOptions.Center);
+        Label(titleRT, font, "PALM MENU", 12f, new Color(0.85f, 0.92f, 1f), FontStyles.Bold, TextAlignmentOptions.Center);
 
         // 4. Content Buttons
         float y = -30f;
