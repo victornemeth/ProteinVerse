@@ -34,6 +34,16 @@ public class PointInfoPanel : MonoBehaviour
     private TextMeshProUGUI _umapText;
     private TextMeshProUGUI _domainStatus, _proteinStatus;
 
+    // ── Tabs ──────────────────────────────────────────────────────
+    private GameObject _infoTabObj;
+    private GameObject _structureTabObj;
+    private GameObject _structureContainer;
+    private CartoonProteinVisualizer _pdbRenderer;
+    private Button _tabStructureBtn;
+    private Button _tabInfoBtn;
+    private Image _tabStructureImg;
+    private Image _tabInfoImg;
+
     // ── Dynamic containers ────────────────────────────────────────
     private RectTransform _domainBarsRT;    // backbone + coloured domain bars
     private RectTransform _domainLegendRT;  // text legend rows
@@ -112,6 +122,12 @@ public class PointInfoPanel : MonoBehaviour
         HandleGrab();
         CheckButtonPoke();
         HandleControllerScroll();
+
+        // Slowly rotate the protein structure if the tab is active
+        if (_structureContainer != null && _structureContainer.activeInHierarchy)
+        {
+            _structureContainer.transform.Rotate(Vector3.up, 20f * Time.deltaTime, Space.Self);
+        }
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -193,6 +209,13 @@ public class PointInfoPanel : MonoBehaviour
         StartCoroutine(FetchBasic(sequenceId));
         StartCoroutine(FetchDomains(sequenceId));
         StartCoroutine(FetchProteins(sequenceId));
+
+        if (_pdbRenderer != null)
+        {
+            _pdbRenderer.FetchAndRender($"https://pharp.ugent.be/static/pdbs/{sequenceId}.pdb");
+        }
+        
+        SetTab(0); // Show structure tab by default when opened
     }
 
     public void Hide()
@@ -615,13 +638,54 @@ public class PointInfoPanel : MonoBehaviour
         var cbXRT = Stretch("X", cbRT.transform);
         Label(cbXRT, font, "✕", 18f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
 
+        // ── Tabs ──────────────────────────────────────────────────
+        var tabBarRT = Pin("TabBar", bg, -44f, 30f);
+        tabBarRT.gameObject.AddComponent<Image>().color = new Color(0.10f, 0.12f, 0.30f, 1f);
+
+        // Structure Tab
+        var tsRT = new GameObject("TabStruct").AddComponent<RectTransform>();
+        tsRT.SetParent(tabBarRT, false);
+        tsRT.anchorMin = new Vector2(0f, 0f); tsRT.anchorMax = new Vector2(0.5f, 1f);
+        tsRT.offsetMin = tsRT.offsetMax = Vector2.zero;
+        _tabStructureImg = tsRT.gameObject.AddComponent<Image>();
+        _tabStructureBtn = tsRT.gameObject.AddComponent<Button>();
+        _tabStructureBtn.targetGraphic = _tabStructureImg;
+        _tabStructureBtn.onClick.AddListener(() => SetTab(0));
+        Label(tsRT, font, "STRUCTURE", 11f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
+        
+        // Info Tab
+        var tiRT = new GameObject("TabInfo").AddComponent<RectTransform>();
+        tiRT.SetParent(tabBarRT, false);
+        tiRT.anchorMin = new Vector2(0.5f, 0f); tiRT.anchorMax = new Vector2(1f, 1f);
+        tiRT.offsetMin = tiRT.offsetMax = Vector2.zero;
+        _tabInfoImg = tiRT.gameObject.AddComponent<Image>();
+        _tabInfoBtn = tiRT.gameObject.AddComponent<Button>();
+        _tabInfoBtn.targetGraphic = _tabInfoImg;
+        _tabInfoBtn.onClick.AddListener(() => SetTab(1));
+        Label(tiRT, font, "INFO", 11f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
+
+        // ── Structure Tab Content ──────────────────────────────────
+        _structureTabObj = new GameObject("StructureTab");
+        var stRT = _structureTabObj.AddComponent<RectTransform>();
+        stRT.SetParent(bg, false);
+        stRT.anchorMin = Vector2.zero; stRT.anchorMax = Vector2.one;
+        stRT.offsetMin = new Vector2(0f, 24f); stRT.offsetMax = new Vector2(0f, -74f);
+        
+        _structureContainer = new GameObject("PdbContainer");
+        _structureContainer.transform.SetParent(stRT, false);
+        _structureContainer.transform.localPosition = new Vector3(0, 0, -40f); // Center of panel, popped out slightly
+        _structureContainer.transform.localScale = Vector3.one * 40f; // Larger scale for protein
+
+        _pdbRenderer = _structureContainer.AddComponent<CartoonProteinVisualizer>();
+
         // ── Scroll View Setup ─────────────────────────────────────
         var scrollViewRT = new GameObject("ScrollView").AddComponent<RectTransform>();
+        _infoTabObj = scrollViewRT.gameObject;
         scrollViewRT.SetParent(bg, false);
         scrollViewRT.anchorMin = new Vector2(0f, 0f);
         scrollViewRT.anchorMax = new Vector2(1f, 1f);
         scrollViewRT.offsetMin = new Vector2(0f, 24f); // Leave room for footer
-        scrollViewRT.offsetMax = new Vector2(0f, -44f); // Leave room for header
+        scrollViewRT.offsetMax = new Vector2(0f, -74f); // Leave room for header + tabs
 
         var viewportRT = new GameObject("Viewport").AddComponent<RectTransform>();
         viewportRT.SetParent(scrollViewRT, false);
@@ -717,6 +781,19 @@ public class PointInfoPanel : MonoBehaviour
         umapRT.sizeDelta = new Vector2(-24f, 20f);
         umapRT.anchoredPosition = new Vector2(0f, 5f);
         _umapText = Label(umapRT, font, "", 8.5f, new Color(0.40f, 0.92f, 0.42f), FontStyles.Normal, TextAlignmentOptions.Center);
+        
+        SetTab(0); // Default to Structure tab
+    }
+
+    void SetTab(int index)
+    {
+        bool isStructure = index == 0;
+        
+        _structureTabObj.SetActive(isStructure);
+        _infoTabObj.SetActive(!isStructure);
+        
+        _tabStructureImg.color = isStructure ? new Color(0.18f, 0.22f, 0.50f, 1f) : new Color(0.10f, 0.12f, 0.30f, 1f);
+        _tabInfoImg.color      = !isStructure ? new Color(0.18f, 0.22f, 0.50f, 1f) : new Color(0.10f, 0.12f, 0.30f, 1f);
     }
 
     // ─────────────────────────────────────────────────────────────
