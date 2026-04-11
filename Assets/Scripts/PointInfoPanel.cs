@@ -58,6 +58,13 @@ public class PointInfoPanel : MonoBehaviour
     private Vector3     _grabOffset;
     private bool        _wasRPinch, _wasLPinch, _wasPoking;
 
+    // ── Controller scroll ─────────────────────────────────────────
+    private Transform  _rightAimAnchor;
+    private ScrollRect _scrollRect;
+    private bool       _wasTriggerScroll;
+    private Vector3    _dragStartControllerPos;   // zero = not dragging
+    private float      _dragStartScrollNorm;
+
     // ── Domain colour palette ─────────────────────────────────────
     static readonly Color[] Palette = {
         new Color(0.30f, 0.70f, 1.00f),
@@ -83,10 +90,11 @@ public class PointInfoPanel : MonoBehaviour
         {
             _rightAnchor = rig.rightHandAnchor;
             _leftAnchor  = rig.leftHandAnchor;
-            _rightHand   = rig.rightHandAnchor.GetComponentInChildren<OVRHand>();
-            _leftHand    = rig.leftHandAnchor.GetComponentInChildren<OVRHand>();
-            _rightSkel   = rig.rightHandAnchor.GetComponentInChildren<OVRSkeleton>();
-            _leftSkel    = rig.leftHandAnchor.GetComponentInChildren<OVRSkeleton>();
+            _rightHand      = rig.rightHandAnchor.GetComponentInChildren<OVRHand>();
+            _leftHand       = rig.leftHandAnchor.GetComponentInChildren<OVRHand>();
+            _rightSkel      = rig.rightHandAnchor.GetComponentInChildren<OVRSkeleton>();
+            _leftSkel       = rig.leftHandAnchor.GetComponentInChildren<OVRSkeleton>();
+            _rightAimAnchor = rig.rightControllerAnchor;
         }
 
         StartCoroutine(HideNextFrame());
@@ -103,6 +111,7 @@ public class PointInfoPanel : MonoBehaviour
         if (!gameObject.activeSelf) return;
         HandleGrab();
         CheckButtonPoke();
+        HandleControllerScroll();
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -186,7 +195,76 @@ public class PointInfoPanel : MonoBehaviour
         StartCoroutine(FetchProteins(sequenceId));
     }
 
-    public void Hide() { _grabbed = false; gameObject.SetActive(false); }
+    public void Hide()
+    {
+        _grabbed = false;
+        _dragStartControllerPos = Vector3.zero;
+        gameObject.SetActive(false);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    //  Controller scroll
+    // ─────────────────────────────────────────────────────────────
+
+    /// <summary>Returns true when the given world-space ray hits the visible panel face.</summary>
+    public bool IsRayHittingPanel(Vector3 origin, Vector3 direction)
+    {
+        if (!gameObject.activeSelf) return false;
+        float denom = Vector3.Dot(transform.forward, direction);
+        if (Mathf.Abs(denom) < 1e-4f) return false;
+        float t = Vector3.Dot(transform.position - origin, transform.forward) / denom;
+        if (t < 0.05f) return false;
+        // InverseTransformPoint accounts for the 0.001 world scale → result in canvas units
+        Vector3 local = transform.InverseTransformPoint(origin + direction * t);
+        return Mathf.Abs(local.x) < W * 0.5f && Mathf.Abs(local.y) < H * 0.5f;
+    }
+
+    void HandleControllerScroll()
+    {
+        if (_scrollRect == null || _rightAimAnchor == null) return;
+
+        bool onPanel = IsRayHittingPanel(_rightAimAnchor.position, _rightAimAnchor.forward);
+        bool trigger  = OVRInput.Get(OVRInput.RawButton.RIndexTrigger);
+        bool triggerDown = trigger && !_wasTriggerScroll;
+        _wasTriggerScroll = trigger;
+
+        // ── Joystick scroll (ray must be on panel) ────────────────
+        if (onPanel)
+        {
+            float joy = OVRInput.Get(OVRInput.Axis2D.PrimaryThumbstick, OVRInput.Controller.RTouch).y;
+            if (Mathf.Abs(joy) > 0.1f)
+                _scrollRect.velocity = new Vector2(0f, joy * 900f);
+        }
+
+        // ── Trigger drag scroll ───────────────────────────────────
+        // Start a drag when trigger is pressed while ray is on the panel.
+        if (triggerDown && onPanel)
+        {
+            _dragStartControllerPos = _rightAimAnchor.position;
+            _dragStartScrollNorm    = _scrollRect.verticalNormalizedPosition;
+        }
+
+        // Continue drag regardless of whether ray drifted off panel —
+        // feels natural and mirrors how touchscreen drag works.
+        bool dragging = trigger && _dragStartControllerPos != Vector3.zero;
+        if (dragging)
+        {
+            Vector3 delta       = _rightAimAnchor.position - _dragStartControllerPos;
+            float   deltaAlongUp = Vector3.Dot(delta, transform.up);
+            // canvas scale is 0.001 → multiply world delta by 1000 to get canvas units
+            float   deltaCU     = deltaAlongUp * 1000f;
+            float   contentH    = _scrollRect.content.rect.height;
+            float   viewportH   = ((RectTransform)_scrollRect.viewport).rect.height;
+            float   scrollable  = contentH - viewportH;
+            if (scrollable > 0f)
+                _scrollRect.verticalNormalizedPosition =
+                    Mathf.Clamp01(_dragStartScrollNorm + deltaCU / scrollable);
+        }
+
+        // Clear drag when trigger is released.
+        if (!trigger)
+            _dragStartControllerPos = Vector3.zero;
+    }
 
     // ─────────────────────────────────────────────────────────────
     //  Reset / loading state
@@ -559,16 +637,16 @@ public class PointInfoPanel : MonoBehaviour
         var contentImg = contentRT.gameObject.AddComponent<Image>();
         contentImg.color = new Color(0, 0, 0, 0); // Transparent background to catch drag events
 
-        var scrollRect = scrollViewRT.gameObject.AddComponent<ScrollRect>();
-        scrollRect.content = contentRT;
-        scrollRect.viewport = viewportRT;
-        scrollRect.horizontal = false;
-        scrollRect.vertical = true;
-        scrollRect.scrollSensitivity = 20f;
-        // Optional: add inertia, movement type
-        scrollRect.movementType = ScrollRect.MovementType.Elastic;
-        scrollRect.inertia = true;
-        scrollRect.decelerationRate = 0.135f;
+        _scrollRect = scrollViewRT.gameObject.AddComponent<ScrollRect>();
+        _scrollRect.content = contentRT;
+        _scrollRect.viewport = viewportRT;
+        _scrollRect.horizontal = false;
+        _scrollRect.vertical = true;
+        _scrollRect.scrollSensitivity = 20f;
+        _scrollRect.movementType = ScrollRect.MovementType.Elastic;
+        _scrollRect.inertia = true;
+        _scrollRect.decelerationRate = 0.135f;
+        var scrollRect = _scrollRect; // keep local alias for the layout code below
 
         // ── Content: track Y from top (negative = downward)
         float y = -10f;

@@ -30,6 +30,9 @@ using System.Collections;
 using System.IO;
 using UnityEngine;
 using UnityEngine.Networking;
+using Unity.Collections;
+using Unity.Jobs;
+using Unity.Burst;
 
 [AddComponentMenu("UMAP/Point Cloud")]
 public class UmapPointCloud : MonoBehaviour
@@ -54,27 +57,22 @@ public class UmapPointCloud : MonoBehaviour
     // ─────────────────────────────────────────────────────────────
 
     private Vector3[] localPositions;   // normalized to [-0.5, 0.5]^3
+    private NativeArray<Vector3> nativePositions;
+    private NativeArray<int> nativeResultIndex;
     private Vector3[] rawPositions;     // original UMAP1/2/3 values from CSV
     private Color[]   pointColors;
     private string[]  sequenceIds;
     private int       pointCount;
 
     // ─────────────────────────────────────────────────────────────
-    //  GPU Rendering
+    //  Rendering  (MeshRenderer — stereo-safe, no DrawMeshInstancedIndirect)
     // ─────────────────────────────────────────────────────────────
 
-    private Mesh          quad;
-    private Material      cloudMaterial;
-    private ComputeBuffer positionBuffer;
-    private ComputeBuffer colorBuffer;
-    private ComputeBuffer argsBuffer;
-    private Bounds        drawBounds;
+    private Mesh         cloudMesh;
+    private Material     cloudMaterial;
+    private MeshRenderer cloudRenderer;
 
-    private static readonly int ShaderCloudMatrix = Shader.PropertyToID("_CloudMatrix");
-    private static readonly int ShaderPointSize   = Shader.PropertyToID("_PointSize");
-    private static readonly int ShaderPointCount  = Shader.PropertyToID("_PointCount");
-    private static readonly int ShaderPositions   = Shader.PropertyToID("_Positions");
-    private static readonly int ShaderColors      = Shader.PropertyToID("_Colors");
+    private static readonly int ShaderPointSize = Shader.PropertyToID("_PointSize");
 
     // ─────────────────────────────────────────────────────────────
     //  Highlight marker (a simple sphere — stereo-correct, no shader tricks)
@@ -82,6 +80,7 @@ public class UmapPointCloud : MonoBehaviour
 
     private Transform    highlightMarker;
     private MeshRenderer highlightRenderer;
+    private Material     highlightMat;       // cached instance — avoids .material accessor overhead
 
     // ─────────────────────────────────────────────────────────────
     //  OVR References
@@ -144,7 +143,6 @@ public class UmapPointCloud : MonoBehaviour
 
     void Start()
     {
-        quad = CreateBillboardQuad();
         SetupAimRay();
         SetupHighlightMarker();
         StartCoroutine(LoadCSV());
@@ -185,18 +183,22 @@ public class UmapPointCloud : MonoBehaviour
         highlightRenderer.receiveShadows    = false;
 
         // Unlit so it's fully visible in passthrough regardless of lighting
-        var mat = new Material(Shader.Find("Unlit/Color")) { color = Color.white };
-        highlightRenderer.material = mat;
+        highlightMat = new Material(Shader.Find("Unlit/Color")) { color = Color.white };
+        highlightRenderer.material = highlightMat;
     }
 
     void Update()
     {
-        if (cloudMaterial == null || argsBuffer == null) return;
+        if (cloudMaterial == null || cloudRenderer == null) return;
 
         HandleInteraction();
 
-        cloudMaterial.SetMatrix(ShaderCloudMatrix, transform.localToWorldMatrix);
-        cloudMaterial.SetFloat(ShaderPointSize, basePointSize * transform.localScale.x);
+        // Keep point size proportional to the cloud's world-space scale.
+        if (transform.hasChanged)
+        {
+            cloudMaterial.SetFloat(ShaderPointSize, basePointSize * transform.localScale.x);
+            transform.hasChanged = false;
+        }
 
         if (++hoverFrame % 5 == 0)
             UpdateHover();
@@ -204,15 +206,14 @@ public class UmapPointCloud : MonoBehaviour
         UpdateAimRay();
         UpdateHighlightMarker();
         UpdateInfoPanelPosition();
-
-        Graphics.DrawMeshInstancedIndirect(quad, 0, cloudMaterial, drawBounds, argsBuffer);
+        // MeshRenderer draws automatically — no manual Draw* call needed.
     }
 
     void OnDestroy()
     {
-        positionBuffer?.Release();
-        colorBuffer?.Release();
-        argsBuffer?.Release();
+        if (nativePositions.IsCreated) nativePositions.Dispose();
+        if (nativeResultIndex.IsCreated) nativeResultIndex.Dispose();
+        if (cloudMesh != null)     Destroy(cloudMesh);
         if (cloudMaterial != null) Destroy(cloudMaterial);
     }
 
@@ -222,7 +223,7 @@ public class UmapPointCloud : MonoBehaviour
 
     IEnumerator LoadCSV()
     {
-        string path = Path.Combine(Application.streamingAssetsPath, "umap_coordinates_n15.csv");
+        string path = Path.Combine(Application.streamingAssetsPath, "umap_thinned.csv");
 
 #if UNITY_ANDROID && !UNITY_EDITOR
         using var req = UnityWebRequest.Get(path);
@@ -290,6 +291,9 @@ public class UmapPointCloud : MonoBehaviour
             pointColors[i] = Viridis(t);
         }
 
+        nativePositions = new NativeArray<Vector3>(localPositions, Allocator.Persistent);
+        nativeResultIndex = new NativeArray<int>(1, Allocator.Persistent);
+
         Debug.Log($"[UmapPointCloud] Parsed {pointCount} points.");
     }
 
@@ -299,7 +303,7 @@ public class UmapPointCloud : MonoBehaviour
                        System.Globalization.CultureInfo.InvariantCulture, out v);
 
     // ─────────────────────────────────────────────────────────────
-    //  GPU Buffer Initialisation
+    //  Mesh + Renderer Initialisation
     // ─────────────────────────────────────────────────────────────
 
     void InitGPU()
@@ -310,36 +314,64 @@ public class UmapPointCloud : MonoBehaviour
             Debug.LogError("[UmapPointCloud] Shader 'Custom/PointCloud' not found.");
             return;
         }
-
         cloudMaterial = new Material(shader) { name = "UmapPointCloudMaterial" };
 
-        positionBuffer = new ComputeBuffer(pointCount, sizeof(float) * 3);
-        var pos = new Vector3[pointCount];
-        Array.Copy(localPositions, pos, pointCount);
-        positionBuffer.SetData(pos);
+        // Build a static mesh: 4 vertices per point (billboard quad).
+        // All 4 vertices share the same cloud-local centre position; the shader
+        // offsets them in clip-space based on UV corner, so they expand into a disc.
+        //
+        // Using a real Mesh + MeshRenderer lets Unity's standard rendering pipeline
+        // dispatch stereo (multiview / SPI / multi-pass) correctly without any
+        // manual instance-ID arithmetic.
+        int vCount = pointCount * 4;
 
-        colorBuffer = new ComputeBuffer(pointCount, sizeof(float) * 4);
-        var col = new Vector4[pointCount];
-        for (int i = 0; i < pointCount; i++)
-            col[i] = new Vector4(pointColors[i].r, pointColors[i].g, pointColors[i].b, 1f);
-        colorBuffer.SetData(col);
+        var verts  = new Vector3[vCount];
+        var uvs    = new Vector2[vCount];
+        var cols   = new Color32[vCount];
+        var tris   = new int[pointCount * 6];
 
-        argsBuffer = new ComputeBuffer(1, 5 * sizeof(uint), ComputeBufferType.IndirectArguments);
-        argsBuffer.SetData(new uint[]
+        // UV corners map to billboard offsets: (uv - 0.5) in the vertex shader.
+        var corners = new Vector2[]
         {
-            (uint)quad.GetIndexCount(0),
-            (uint)pointCount,
-            (uint)quad.GetIndexStart(0),
-            (uint)quad.GetBaseVertex(0),
-            0u
-        });
+            new Vector2(0, 0), new Vector2(1, 0),
+            new Vector2(1, 1), new Vector2(0, 1),
+        };
 
-        cloudMaterial.SetBuffer(ShaderPositions,  positionBuffer);
-        cloudMaterial.SetBuffer(ShaderColors,     colorBuffer);
-        cloudMaterial.SetInt(ShaderPointCount,    pointCount);
+        for (int i = 0; i < pointCount; i++)
+        {
+            Color32 c = pointColors[i];
+            for (int k = 0; k < 4; k++)
+            {
+                int vi    = i * 4 + k;
+                verts[vi] = localPositions[i];  // same centre for all 4 corners
+                uvs[vi]   = corners[k];
+                cols[vi]  = c;
+            }
+            int ti = i * 6, v0 = i * 4;
+            tris[ti+0] = v0;   tris[ti+1] = v0+2; tris[ti+2] = v0+1;
+            tris[ti+3] = v0;   tris[ti+4] = v0+3; tris[ti+5] = v0+2;
+        }
 
-        drawBounds = new Bounds(Vector3.zero, Vector3.one * 2000f);
-        Debug.Log("[UmapPointCloud] GPU buffers ready.");
+        cloudMesh          = new Mesh { name = "PointCloudMesh" };
+        cloudMesh.vertices = verts;
+        cloudMesh.uv       = uvs;
+        cloudMesh.colors32 = cols;
+        cloudMesh.triangles = tris;
+        // Local bounds cover the normalised [-0.5, 0.5]³ cloud with a little margin.
+        cloudMesh.bounds   = new Bounds(Vector3.zero, Vector3.one * 1.5f);
+        cloudMesh.UploadMeshData(true);  // send to GPU and free CPU copy
+
+        var mf         = gameObject.AddComponent<MeshFilter>();
+        mf.sharedMesh  = cloudMesh;
+
+        cloudRenderer                    = gameObject.AddComponent<MeshRenderer>();
+        cloudRenderer.sharedMaterial     = cloudMaterial;
+        cloudRenderer.shadowCastingMode  = UnityEngine.Rendering.ShadowCastingMode.Off;
+        cloudRenderer.receiveShadows     = false;
+
+        cloudMaterial.SetFloat(ShaderPointSize, basePointSize * transform.localScale.x);
+
+        Debug.Log($"[UmapPointCloud] Mesh ready ({pointCount} points, {vCount} verts).");
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -407,9 +439,16 @@ public class UmapPointCloud : MonoBehaviour
             }
             else if (infoPanel != null && infoPanel.gameObject.activeSelf)
             {
-                // Click at empty space while panel is open → close it
-                infoPanel.Hide();
-                selectedIndex = -1;
+                // Only close if the ray is NOT aimed at the panel itself —
+                // if it is, the trigger starts a scroll drag in PointInfoPanel.
+                Transform aimSrc = rightAimAnchor != null ? rightAimAnchor : rightAnchor;
+                bool rayOnPanel  = aimSrc != null &&
+                                   infoPanel.IsRayHittingPanel(aimSrc.position, aimSrc.forward);
+                if (!rayOnPanel)
+                {
+                    infoPanel.Hide();
+                    selectedIndex = -1;
+                }
             }
 
             return; // don't start a grab on the same frame as a click
@@ -517,22 +556,21 @@ public class UmapPointCloud : MonoBehaviour
         dirLocal.Normalize();
 
         const float threshSq = 0.06f * 0.06f;
-        float nearestT = float.MaxValue;
-        int   nearest  = -1;
 
-        for (int i = 0; i < pointCount; i++)
+        if (!nativePositions.IsCreated) return;
+
+        var job = new FindNearestJob
         {
-            Vector3 toP    = localPositions[i] - originLocal;
-            float   t      = Vector3.Dot(toP, dirLocal);
-            if (t < 0f) continue;
-            Vector3 proj   = toP - dirLocal * t;
-            float   perpSq = proj.x * proj.x + proj.y * proj.y + proj.z * proj.z;
-            if (perpSq < threshSq && t < nearestT)
-            {
-                nearestT = t;
-                nearest  = i;
-            }
-        }
+            positions = nativePositions,
+            originLocal = originLocal,
+            dirLocal = dirLocal,
+            threshSq = threshSq,
+            pointCount = pointCount,
+            resultIndex = nativeResultIndex
+        };
+        job.Schedule().Complete();
+        
+        int nearest = nativeResultIndex[0];
 
         if (nearest == hoveredIndex) return;
         hoveredIndex = nearest;
@@ -589,7 +627,7 @@ public class UmapPointCloud : MonoBehaviour
         // Color: match point color but brightened
         Color col = pointColors[activeIdx];
         col = Color.Lerp(col, Color.white, selectedIndex >= 0 ? 0.7f : 0.4f);
-        highlightRenderer.material.color = col;
+        highlightMat.color = col;
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -660,24 +698,7 @@ public class UmapPointCloud : MonoBehaviour
     static string TruncateId(string id, int maxLen) =>
         id.Length <= maxLen ? id : id.Substring(0, maxLen) + "…";
 
-    static Mesh CreateBillboardQuad()
-    {
-        var m = new Mesh { name = "PointBillboard" };
-        m.vertices  = new Vector3[]
-        {
-            new Vector3(-0.5f, -0.5f, 0),
-            new Vector3( 0.5f, -0.5f, 0),
-            new Vector3( 0.5f,  0.5f, 0),
-            new Vector3(-0.5f,  0.5f, 0),
-        };
-        m.uv        = new Vector2[] { Vector2.zero, Vector2.right, Vector2.one, Vector2.up };
-        m.triangles = new int[] { 0, 2, 1, 0, 3, 2 };
-        m.RecalculateNormals();
-        m.bounds = new Bounds(Vector3.zero, Vector3.one * 10000f);
-        return m;
-    }
-
-    static Color Viridis(float t)
+static Color Viridis(float t)
     {
         t = Mathf.Clamp01(t);
         Color c0 = new Color(0.267f, 0.005f, 0.329f);
@@ -706,5 +727,43 @@ public class UmapPointCloud : MonoBehaviour
         selectedIndex = -1;
         infoLabel?.gameObject.SetActive(false);
         infoPanel?.Hide();
+    }
+
+    [BurstCompile]
+    private struct FindNearestJob : IJob
+    {
+        [ReadOnly] public NativeArray<Vector3> positions;
+        public Vector3 originLocal;
+        public Vector3 dirLocal;
+        public float threshSq;
+        public int pointCount;
+
+        public NativeArray<int> resultIndex;
+
+        public void Execute()
+        {
+            float nearestT = float.MaxValue;
+            int nearest = -1;
+
+            for (int i = 0; i < pointCount; i++)
+            {
+                Vector3 toP = positions[i] - originLocal;
+                float t = toP.x * dirLocal.x + toP.y * dirLocal.y + toP.z * dirLocal.z;
+                if (t < 0f) continue;
+                
+                Vector3 proj;
+                proj.x = toP.x - dirLocal.x * t;
+                proj.y = toP.y - dirLocal.y * t;
+                proj.z = toP.z - dirLocal.z * t;
+                
+                float perpSq = proj.x * proj.x + proj.y * proj.y + proj.z * proj.z;
+                if (perpSq < threshSq && t < nearestT)
+                {
+                    nearestT = t;
+                    nearest = i;
+                }
+            }
+            resultIndex[0] = nearest;
+        }
     }
 }
