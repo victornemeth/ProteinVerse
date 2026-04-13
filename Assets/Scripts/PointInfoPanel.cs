@@ -38,7 +38,7 @@ public class PointInfoPanel : MonoBehaviour
     private GameObject _infoTabObj;
     private GameObject _structureTabObj;
     private GameObject _structureContainer;
-    private CartoonProteinVisualizer _pdbRenderer;
+    private ProteinVisualizer _pdbRenderer;
     private Button _tabStructureBtn;
     private Button _tabInfoBtn;
     private Image _tabStructureImg;
@@ -674,9 +674,9 @@ public class PointInfoPanel : MonoBehaviour
         _structureContainer = new GameObject("PdbContainer");
         _structureContainer.transform.SetParent(stRT, false);
         _structureContainer.transform.localPosition = new Vector3(0, 0, -40f); // Center of panel, popped out slightly
-        _structureContainer.transform.localScale = Vector3.one * 40f; // Larger scale for protein
+        _structureContainer.transform.localScale = Vector3.one * 1.4f; // Increased scale 7x
 
-        _pdbRenderer = _structureContainer.AddComponent<CartoonProteinVisualizer>();
+        _pdbRenderer = _structureContainer.AddComponent<ProteinVisualizer>();
 
         // ── Scroll View Setup ─────────────────────────────────────
         var scrollViewRT = new GameObject("ScrollView").AddComponent<RectTransform>();
