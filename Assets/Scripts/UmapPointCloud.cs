@@ -45,6 +45,9 @@ public class UmapPointCloud : MonoBehaviour
     [Tooltip("Base point radius in world-space meters at cloud scale = 1")]
     [SerializeField] private float basePointSize = 0.010f;
 
+    [Tooltip("World-space radius (meters) around the index fingertip that detects nearby points")]
+    [SerializeField] private float proximityRadius = 0.05f;
+
     [Header("Info Display")]
     [Tooltip("Optional world-space TextMeshPro that shows the hovered/selected point ID")]
     [SerializeField] private TMPro.TextMeshPro infoLabel;
@@ -73,6 +76,8 @@ public class UmapPointCloud : MonoBehaviour
     private MeshRenderer cloudRenderer;
 
     private static readonly int ShaderPointSize = Shader.PropertyToID("_PointSize");
+    private static readonly int ShaderMoveTint  = Shader.PropertyToID("_MoveTint");
+    private bool _prevMovementEnabled = false;
 
     // ─────────────────────────────────────────────────────────────
     //  Highlight marker (a simple sphere — stereo-correct, no shader tricks)
@@ -89,7 +94,8 @@ public class UmapPointCloud : MonoBehaviour
     private Transform rightAnchor, leftAnchor;
     private Transform rightAimAnchor;
     private Transform cameraTransform;
-    private OVRHand   rightHand, leftHand;
+    private OVRHand     rightHand, leftHand;
+    private OVRSkeleton rightSkel, leftSkel;
     private LineRenderer aimRay;
 
     // ─────────────────────────────────────────────────────────────
@@ -112,7 +118,6 @@ public class UmapPointCloud : MonoBehaviour
 
     private int  hoveredIndex  = -1;
     private int  selectedIndex = -1;
-    private int  hoverFrame;
 
     // Previous-frame pinch state for edge detection
     private bool wasRightPinch;
@@ -134,6 +139,8 @@ public class UmapPointCloud : MonoBehaviour
 
             rightHand = rig.rightHandAnchor.GetComponentInChildren<OVRHand>();
             leftHand  = rig.leftHandAnchor.GetComponentInChildren<OVRHand>();
+            rightSkel = rig.rightHandAnchor.GetComponentInChildren<OVRSkeleton>();
+            leftSkel  = rig.leftHandAnchor.GetComponentInChildren<OVRSkeleton>();
         }
         else
         {
@@ -146,6 +153,10 @@ public class UmapPointCloud : MonoBehaviour
         SetupAimRay();
         SetupHighlightMarker();
         StartCoroutine(LoadCSV());
+
+        // Deselect the point whenever the info panel is closed (close button, or click-off)
+        if (infoPanel != null)
+            infoPanel.onHide += () => { selectedIndex = -1; infoLabel?.gameObject.SetActive(false); };
     }
 
     void SetupAimRay()
@@ -200,8 +211,15 @@ public class UmapPointCloud : MonoBehaviour
             transform.hasChanged = false;
         }
 
-        if (++hoverFrame % 5 == 0)
-            UpdateHover();
+        // Tint all points when in move mode so the mode is visually unambiguous.
+        if (isMovementEnabled != _prevMovementEnabled)
+        {
+            _prevMovementEnabled = isMovementEnabled;
+            cloudMaterial.SetColor(ShaderMoveTint,
+                isMovementEnabled ? new Color(1f, 0.55f, 0.15f) : Color.white);
+        }
+
+        UpdateHover();
 
         UpdateAimRay();
         UpdateHighlightMarker();
@@ -415,40 +433,32 @@ public class UmapPointCloud : MonoBehaviour
         bool rTriggerDown = OVRInput.GetDown(OVRInput.RawButton.RIndexTrigger);
 
         // ── Click detection ─────────────────────────────────────
-        // For controllers: index trigger fires a click.
-        // For hands: a pinch-start while a point is hovered fires a click (NOT a grab).
-        bool clickFired = (!isMovementEnabled) && (rTriggerDown || (rPinchDown && hoveredIndex >= 0));
+        bool anyInput = (!isMovementEnabled) && (rTriggerDown || rPinchDown);
 
-        if (clickFired)
+        if (anyInput)
         {
             if (hoveredIndex >= 0)
             {
+                // Point within proximity — select it
                 selectedIndex = hoveredIndex;
                 Debug.Log($"[UmapPointCloud] SELECTED {selectedIndex}: {sequenceIds[selectedIndex]}");
 
                 if (infoPanel != null)
-                {
                     infoPanel.Show(cameraTransform, sequenceIds[selectedIndex], rawPositions[selectedIndex]);
-                }
                 else
-                {
                     ShowInfoLabel(selectedIndex, "SELECTED\n");
-                }
 
                 StartCoroutine(TriggerSelectHaptics());
             }
             else if (infoPanel != null && infoPanel.gameObject.activeSelf)
             {
-                // Only close if the ray is NOT aimed at the panel itself —
-                // if it is, the trigger starts a scroll drag in PointInfoPanel.
-                Transform aimSrc = rightAimAnchor != null ? rightAimAnchor : rightAnchor;
-                bool rayOnPanel  = aimSrc != null &&
-                                   infoPanel.IsRayHittingPanel(aimSrc.position, aimSrc.forward);
-                if (!rayOnPanel)
-                {
+                // Don't dismiss if either hand is near the panel face (would be a grab, not a dismiss)
+                bool handNearPanel =
+                    (rightAnchor != null && infoPanel.IsHandNearForGrab(rightAnchor.position)) ||
+                    (leftAnchor  != null && infoPanel.IsHandNearForGrab(leftAnchor.position));
+
+                if (!handNearPanel)
                     infoPanel.Hide();
-                    selectedIndex = -1;
-                }
             }
 
             return; // don't start a grab on the same frame as a click
@@ -534,7 +544,7 @@ public class UmapPointCloud : MonoBehaviour
 
     void UpdateHover()
     {
-        if (localPositions == null) return;
+        if (localPositions == null || !nativePositions.IsCreated) return;
 
         if (isMovementEnabled)
         {
@@ -546,32 +556,26 @@ public class UmapPointCloud : MonoBehaviour
             return;
         }
 
-        Transform aimSource = rightAimAnchor != null ? rightAimAnchor : rightAnchor;
-        if (aimSource == null) return;
+        // Convert index-fingertip world position to cloud local space
+        Vector3   tipWorld = GetSelectionHandPosition();
+        Matrix4x4 w2l      = transform.worldToLocalMatrix;
+        Vector3   tipLocal = w2l.MultiplyPoint3x4(tipWorld);
 
-        // Transform ray to cloud local space — avoids per-point TransformPoint
-        Matrix4x4 w2l         = transform.worldToLocalMatrix;
-        Vector3   originLocal = w2l.MultiplyPoint3x4(aimSource.position);
-        Vector3   dirLocal    = w2l.MultiplyVector(aimSource.forward);
-        dirLocal.Normalize();
+        // Scale world-space proximity radius into cloud local space (uniform scale assumed)
+        float worldScale = transform.lossyScale.x;
+        float localR     = worldScale > 1e-4f ? proximityRadius / worldScale : proximityRadius;
 
-        const float threshSq = 0.06f * 0.06f;
-
-        if (!nativePositions.IsCreated) return;
-
-        var job = new FindNearestJob
+        var job = new FindNearestProximityJob
         {
-            positions = nativePositions,
-            originLocal = originLocal,
-            dirLocal = dirLocal,
-            threshSq = threshSq,
-            pointCount = pointCount,
-            resultIndex = nativeResultIndex
+            positions   = nativePositions,
+            tipLocal    = tipLocal,
+            threshSq    = localR * localR,
+            pointCount  = pointCount,
+            resultIndex = nativeResultIndex,
         };
         job.Schedule().Complete();
-        
-        int nearest = nativeResultIndex[0];
 
+        int nearest = nativeResultIndex[0];
         if (nearest == hoveredIndex) return;
         hoveredIndex = nearest;
 
@@ -588,6 +592,39 @@ public class UmapPointCloud : MonoBehaviour
         {
             infoLabel.gameObject.SetActive(false);
         }
+    }
+
+    // Returns the world-space position of the right index fingertip.
+    //
+    // Quest 3 uses the XRHand bone system (SkeletonType.XRHandRight), NOT the old Hand_* system.
+    // The two systems share numeric values that COLLIDE:
+    //   Hand_IndexTip  = 20  ==  XRHand_RingTip  (ring finger tip!)
+    //   Hand_Index3    =  8  ==  XRHand_IndexIntermediate
+    //   XRHand_IndexTip    = 10  (correct for XR)
+    //   XRHand_IndexDistal =  9  (distal joint, ~1 cm from tip)
+    // We therefore check the skeleton type at runtime and pick the right constant.
+    Vector3 GetSelectionHandPosition()
+    {
+        if (rightSkel != null && rightSkel.IsInitialized)
+        {
+            bool isXR = rightSkel.GetSkeletonType() == OVRSkeleton.SkeletonType.XRHandRight
+                     || rightSkel.GetSkeletonType() == OVRSkeleton.SkeletonType.XRHandLeft;
+
+            OVRSkeleton.BoneId tipId    = isXR ? OVRSkeleton.BoneId.XRHand_IndexTip
+                                               : OVRSkeleton.BoneId.Hand_IndexTip;
+            OVRSkeleton.BoneId distalId = isXR ? OVRSkeleton.BoneId.XRHand_IndexDistal
+                                               : OVRSkeleton.BoneId.Hand_Index3;
+
+            Vector3 distalPos   = Vector3.zero;
+            bool    foundDistal = false;
+            foreach (var b in rightSkel.Bones)
+            {
+                if (b.Id == tipId)    return b.Transform.position;
+                if (b.Id == distalId) { distalPos = b.Transform.position; foundDistal = true; }
+            }
+            if (foundDistal) return distalPos;
+        }
+        return rightAnchor != null ? rightAnchor.position : Vector3.zero;
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -611,22 +648,23 @@ public class UmapPointCloud : MonoBehaviour
         // Local-space size: cloud spans ~1.0 units; basePointSize is world-space at scale=1
         // so in local space it equals basePointSize (before the cloud's own scale is applied).
         float localSize;
+        Color col = pointColors[activeIdx];
         if (selectedIndex >= 0)
         {
-            // Selected: pulsing, larger
-            float pulse = 1f + 0.25f * Mathf.Sin(Time.time * 5f);
-            localSize = basePointSize * 8f * pulse;
+            // Selected: very subtle scale bounce — small amplitude, slow frequency
+            float bounce = 1f + 0.04f * Mathf.Sin(Time.time * 2f);
+            localSize = basePointSize * 2.5f * bounce;
+            // Distinct cyan accent so selected is unambiguous without being huge
+            col = Color.Lerp(col, new Color(0.2f, 0.95f, 1f), 0.85f);
         }
         else
         {
-            // Hovered: quietly bigger
-            localSize = basePointSize * 3.5f;
+            // Proximity hover: gentle pulse signals "pinch here to select"
+            float pulse = 1f + 0.08f * Mathf.Sin(Time.time * 3f);
+            localSize = basePointSize * 2.8f * pulse;
+            col = Color.Lerp(col, Color.white, 0.45f);
         }
         highlightMarker.localScale = Vector3.one * localSize;
-
-        // Color: match point color but brightened
-        Color col = pointColors[activeIdx];
-        col = Color.Lerp(col, Color.white, selectedIndex >= 0 ? 0.7f : 0.4f);
         highlightMat.color = col;
     }
 
@@ -666,20 +704,8 @@ public class UmapPointCloud : MonoBehaviour
 
     void UpdateAimRay()
     {
-        if (aimRay == null) return;
-        if (isMovementEnabled) { aimRay.enabled = false; return; }
-
-        Transform aimSource = rightAimAnchor != null ? rightAimAnchor : rightAnchor;
-        if (aimSource == null) { aimRay.enabled = false; return; }
-
-        aimRay.enabled = true;
-        Vector3 start = aimSource.position;
-        Vector3 end   = hoveredIndex >= 0
-            ? transform.TransformPoint(localPositions[hoveredIndex])
-            : start + aimSource.forward * 3f;
-
-        aimRay.SetPosition(0, start);
-        aimRay.SetPosition(1, end);
+        // Aim ray removed — selection is now proximity-based, not ray-cast.
+        if (aimRay != null) aimRay.enabled = false;
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -729,41 +755,32 @@ static Color Viridis(float t)
         infoPanel?.Hide();
     }
 
+    // Finds the single nearest point within a sphere around the fingertip.
+    // Returns -1 when no point falls inside the threshold radius.
     [BurstCompile]
-    private struct FindNearestJob : IJob
+    private struct FindNearestProximityJob : IJob
     {
         [ReadOnly] public NativeArray<Vector3> positions;
-        public Vector3 originLocal;
-        public Vector3 dirLocal;
-        public float threshSq;
-        public int pointCount;
-
+        public Vector3 tipLocal;
+        public float   threshSq;   // local-space radius²
+        public int     pointCount;
         public NativeArray<int> resultIndex;
 
         public void Execute()
         {
-            float nearestT = float.MaxValue;
-            int nearest = -1;
-
+            float bestSq = threshSq;
+            int   best   = -1;
             for (int i = 0; i < pointCount; i++)
             {
-                Vector3 toP = positions[i] - originLocal;
-                float t = toP.x * dirLocal.x + toP.y * dirLocal.y + toP.z * dirLocal.z;
-                if (t < 0f) continue;
-                
-                Vector3 proj;
-                proj.x = toP.x - dirLocal.x * t;
-                proj.y = toP.y - dirLocal.y * t;
-                proj.z = toP.z - dirLocal.z * t;
-                
-                float perpSq = proj.x * proj.x + proj.y * proj.y + proj.z * proj.z;
-                if (perpSq < threshSq && t < nearestT)
+                Vector3 d = positions[i] - tipLocal;
+                float distSq = d.x * d.x + d.y * d.y + d.z * d.z;
+                if (distSq < bestSq)
                 {
-                    nearestT = t;
-                    nearest = i;
+                    bestSq = distSq;
+                    best   = i;
                 }
             }
-            resultIndex[0] = nearest;
+            resultIndex[0] = best;
         }
     }
 }

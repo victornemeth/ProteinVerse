@@ -3,6 +3,7 @@ Shader "Custom/PointCloud"
     Properties
     {
         _PointSize ("Point Size (world units)", Float) = 0.012
+        _MoveTint  ("Move Mode Tint", Color) = (1,1,1,1)
     }
     SubShader
     {
@@ -21,7 +22,8 @@ Shader "Custom/PointCloud"
 
             #include "UnityCG.cginc"
 
-            float _PointSize;
+            float  _PointSize;
+            float4 _MoveTint;
 
             struct appdata
             {
@@ -77,7 +79,9 @@ Shader "Custom/PointCloud"
                 // and gives depth cues.
                 half  edge    = smoothstep(0.62h, 0.92h, dist);
                 half4 edgeCol = half4(0.0h, 0.03h, 0.12h, 1.0h);
-                return lerp(i.color, edgeCol, edge * 0.85h);
+                half4 col     = lerp(i.color, edgeCol, edge * 0.85h);
+                // _MoveTint: white = normal, coloured = move-mode overlay
+                return col * half4((half3)_MoveTint.rgb, 1.0h);
             }
             ENDCG
         }

@@ -55,6 +55,9 @@ public class PointInfoPanel : MonoBehaviour
     // ── Close button (for fingertip poke detection) ───────────────
     private Transform _closeBtnTransform;
 
+    /// <summary>Fired whenever the panel hides itself (close button, click-off, etc.).</summary>
+    public System.Action onHide;
+
     // ── Shared API state ─────────────────────────────────────────
     private int    _proteinLength = -1;     // set by /basic/
     private JArray _pendingDomains;         // domains awaiting protein length
@@ -63,10 +66,11 @@ public class PointInfoPanel : MonoBehaviour
     private OVRHand     _rightHand,  _leftHand;
     private Transform   _rightAnchor,_leftAnchor;
     private OVRSkeleton _rightSkel,  _leftSkel;
-    private bool        _grabbed;
-    private Transform   _grabAnchor;
-    private Vector3     _grabOffset;
-    private bool        _wasRPinch, _wasLPinch, _wasPoking;
+    private bool       _grabbed;
+    private Transform  _grabAnchor;
+    private Vector3    _grabLocalOffset;   // offset in anchor's local space (preserves pos under rotation)
+    private Quaternion _grabRotOffset;     // panel rotation relative to anchor rotation at grab start
+    private bool       _wasRPinch, _wasLPinch, _wasPoking;
 
     // ── Controller scroll ─────────────────────────────────────────
     private Transform  _rightAimAnchor;
@@ -134,6 +138,27 @@ public class PointInfoPanel : MonoBehaviour
     //  Hand grab
     // ─────────────────────────────────────────────────────────────
 
+    /// <summary>Sphere radius for initial grab detection (hand anchor must be within this of panel centre).</summary>
+    public const float GrabRadius = 0.22f;
+
+    /// <summary>
+    /// Returns true when <paramref name="worldPos"/> is close enough to the panel face that a
+    /// pinch there should be treated as a grab attempt rather than a dismiss gesture.
+    /// Uses a plane-projection test so it works correctly for any part of the panel,
+    /// not just the centre.
+    /// </summary>
+    public bool IsHandNearForGrab(Vector3 worldPos)
+    {
+        // Transform to canvas-local space.  Canvas scale is 0.001, so
+        // 1 canvas-unit = 1 mm world-space, meaning W/2 = 210 cu = 21 cm.
+        Vector3 local = transform.InverseTransformPoint(worldPos);
+        const float margin = 120f;   // 12 cm extra around every edge
+        const float depth  = 350f;   // 35 cm in front of / behind the face
+        return Mathf.Abs(local.x) < W * 0.5f + margin
+            && Mathf.Abs(local.y) < H * 0.5f + margin
+            && Mathf.Abs(local.z) < depth;
+    }
+
     void HandleGrab()
     {
         bool rP = _rightHand != null && _rightHand.GetFingerIsPinching(OVRHand.HandFinger.Index);
@@ -142,20 +167,36 @@ public class PointInfoPanel : MonoBehaviour
         bool lD = lP && !_wasLPinch;
         _wasRPinch = rP; _wasLPinch = lP;
 
-        const float R = 0.22f;
         if (!_grabbed)
         {
-            if (rD && _rightAnchor && Vector3.Distance(_rightAnchor.position, transform.position) < R)
-            { _grabbed = true; _grabAnchor = _rightAnchor; _grabOffset = transform.position - _rightAnchor.position; }
-            else if (lD && _leftAnchor && Vector3.Distance(_leftAnchor.position, transform.position) < R)
-            { _grabbed = true; _grabAnchor = _leftAnchor;  _grabOffset = transform.position - _leftAnchor.position; }
+            if (rD && _rightAnchor && Vector3.Distance(_rightAnchor.position, transform.position) < GrabRadius)
+                StartGrab(_rightAnchor);
+            else if (lD && _leftAnchor && Vector3.Distance(_leftAnchor.position, transform.position) < GrabRadius)
+                StartGrab(_leftAnchor);
         }
         else
         {
             bool still = _grabAnchor == _rightAnchor ? rP : lP;
-            if (!still) { _grabbed = false; _grabAnchor = null; }
-            else transform.position = _grabAnchor.position + _grabOffset;
+            if (!still)
+            {
+                _grabbed = false;
+                _grabAnchor = null;
+            }
+            else
+            {
+                // Preserve both position AND rotation relative to the grab anchor
+                transform.position = _grabAnchor.position + _grabAnchor.rotation * _grabLocalOffset;
+                transform.rotation = _grabAnchor.rotation * _grabRotOffset;
+            }
         }
+    }
+
+    void StartGrab(Transform anchor)
+    {
+        _grabbed         = true;
+        _grabAnchor      = anchor;
+        _grabLocalOffset = Quaternion.Inverse(anchor.rotation) * (transform.position - anchor.position);
+        _grabRotOffset   = Quaternion.Inverse(anchor.rotation) * transform.rotation;
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -200,7 +241,7 @@ public class PointInfoPanel : MonoBehaviour
         }
 
         gameObject.SetActive(true);
-        _umapText.text = $"UMAP\u2081 {rawUmap.x:F2}  UMAP\u2082 {rawUmap.y:F2}  UMAP\u2083 {rawUmap.z:F2}";
+        _umapText.text = $"UMAP1 {rawUmap.x:F2}  UMAP2 {rawUmap.y:F2}  UMAP3 {rawUmap.z:F2}";
 
         _proteinLength  = -1;
         _pendingDomains = null;
@@ -210,19 +251,22 @@ public class PointInfoPanel : MonoBehaviour
         StartCoroutine(FetchDomains(sequenceId));
         StartCoroutine(FetchProteins(sequenceId));
 
+        // Activate the structure tab first so PdbContainer is active before starting the coroutine
+        SetTab(0);
+
         if (_pdbRenderer != null)
         {
             _pdbRenderer.FetchAndRender($"https://pharp.ugent.be/static/pdbs/{sequenceId}.pdb");
         }
-        
-        SetTab(0); // Show structure tab by default when opened
     }
 
     public void Hide()
     {
-        _grabbed = false;
+        _grabbed    = false;
+        _grabAnchor = null;
         _dragStartControllerPos = Vector3.zero;
         gameObject.SetActive(false);
+        onHide?.Invoke();
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -636,7 +680,7 @@ public class PointInfoPanel : MonoBehaviour
         cb.onClick.AddListener(Hide);
         _closeBtnTransform = cbRT.transform;
         var cbXRT = Stretch("X", cbRT.transform);
-        Label(cbXRT, font, "✕", 18f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
+        Label(cbXRT, font, "X", 18f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
 
         // ── Tabs ──────────────────────────────────────────────────
         var tabBarRT = Pin("TabBar", bg, -44f, 30f);

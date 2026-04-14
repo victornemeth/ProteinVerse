@@ -35,8 +35,13 @@ public class WatchMenu : MonoBehaviour
     private bool _isLookingAtWatch = false;
     private float _currentAlpha = 0f;
 
-    private UmapPointCloud _pointCloud;
+    private UmapPointCloud  _pointCloud;
     private TextMeshProUGUI _toggleMoveText;
+    private Image           _toggleMoveBtnImg;
+
+    // Button colors for each mode
+    static readonly Color ColorSelectMode = new Color(0.08f, 0.10f, 0.25f, 0.97f);  // dark navy
+    static readonly Color ColorMoveMode   = new Color(0.10f, 0.55f, 0.18f, 0.97f);  // vivid green
 
     void Start()
     {
@@ -61,10 +66,17 @@ public class WatchMenu : MonoBehaviour
     {
         if (_pointCloud != null && _toggleMoveText != null)
         {
-            string expectedText = _pointCloud.isMovementEnabled ? "Move Mode: ON" : "Move Mode: OFF";
+            bool moving = _pointCloud.isMovementEnabled;
+
+            string expectedText = moving ? "MOVE MODE\nON" : "SELECT MODE\nOFF";
             if (_toggleMoveText.text != expectedText)
-            {
                 _toggleMoveText.text = expectedText;
+
+            if (_toggleMoveBtnImg != null)
+            {
+                Color target = moving ? ColorMoveMode : ColorSelectMode;
+                if (_toggleMoveBtnImg.color != target)
+                    _toggleMoveBtnImg.color = target;
             }
         }
 
@@ -197,26 +209,33 @@ public class WatchMenu : MonoBehaviour
         titleRT.offsetMax = new Vector2(-12f, 0f);
         Label(titleRT, font, "PALM MENU", 12f, new Color(0.85f, 0.92f, 1f), FontStyles.Bold, TextAlignmentOptions.Center);
 
-        // 4. Content Buttons
-        float y = -30f;
-        Divider(bgRT, y); y -= 10f;
-        
-        // Move Mode Toggle Button
-        var btnRT = AbsRow(bgRT, -50f, 60f, 12f); // Taller button centered
+        // 4. Move Mode Toggle — fills entire panel below the header
+        var btnRT = new GameObject("MoveModeBtn").AddComponent<RectTransform>();
+        btnRT.SetParent(bgRT, false);
+        // Stretch to fill, leaving a small margin on all sides except the top where the header sits
+        btnRT.anchorMin = Vector2.zero;
+        btnRT.anchorMax = Vector2.one;
+        btnRT.offsetMin = new Vector2(6f,  6f);   // 6 px bottom & sides
+        btnRT.offsetMax = new Vector2(-6f, -36f); // 6 px sides; 36 px from top (30 header + 6 gap)
+
+        bool initialMoving = _pointCloud != null && _pointCloud.isMovementEnabled;
         var btnImg = btnRT.gameObject.AddComponent<Image>();
-        btnImg.color = new Color(0.10f, 0.12f, 0.26f, 0.9f);
-        btnImg.raycastTarget = true; // Ensure this catches the poke
-        
+        btnImg.color = initialMoving ? ColorMoveMode : ColorSelectMode;
+        btnImg.raycastTarget = true;
+
         var btn = btnRT.gameObject.AddComponent<Button>();
         btn.targetGraphic = btnImg;
         var colors = btn.colors;
-        colors.highlightedColor = new Color(0.15f, 0.20f, 0.40f, 1f);
-        colors.pressedColor = new Color(0.20f, 0.25f, 0.50f, 1f);
+        colors.normalColor      = Color.white;                          // let Image.color drive the base
+        colors.highlightedColor = new Color(1.18f, 1.18f, 1.18f, 1f);  // brighten on hover
+        colors.pressedColor     = new Color(0.75f, 0.75f, 0.75f, 1f);  // darken on press
+        colors.colorMultiplier  = 1f;
         btn.colors = colors;
-        
-        string initialText = (_pointCloud != null && _pointCloud.isMovementEnabled) ? "Move Mode: ON" : "Move Mode: OFF";
-        _toggleMoveText = Label(btnRT, font, initialText, 16f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center); // Larger text
-        
+
+        string initialText = initialMoving ? "MOVE MODE\nON" : "SELECT MODE\nOFF";
+        _toggleMoveText = Label(btnRT, font, initialText, 22f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
+
+        _toggleMoveBtnImg = btnImg;
         btn.onClick.AddListener(OnToggleMoveModeClicked);
     }
 
@@ -262,15 +281,9 @@ public class WatchMenu : MonoBehaviour
 
     private void OnToggleMoveModeClicked()
     {
-        if (_pointCloud != null)
-        {
-            _pointCloud.isMovementEnabled = !_pointCloud.isMovementEnabled;
-            
-            if (_toggleMoveText != null)
-            {
-                _toggleMoveText.text = _pointCloud.isMovementEnabled ? "Move Mode: ON" : "Move Mode: OFF";
-            }
-        }
+        if (_pointCloud == null) return;
+        _pointCloud.isMovementEnabled = !_pointCloud.isMovementEnabled;
+        // Update() will sync text and color on the next frame.
     }
 
     // ── UI Layout Helpers ────────────────────────────────────────────────
