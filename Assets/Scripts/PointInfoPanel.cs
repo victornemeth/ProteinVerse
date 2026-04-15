@@ -37,11 +37,15 @@ public class PointInfoPanel : MonoBehaviour
     // ── Tabs ──────────────────────────────────────────────────────
     private GameObject _infoTabObj;
     private GameObject _structureTabObj;
+    private RectTransform _structureTabRT;  // parent for PdbContainer; needed to recreate it after release
     private GameObject _structureContainer;
     private ProteinVisualizer _pdbRenderer;
     private Button _tabStructureBtn;
     private Button _tabInfoBtn;
     private Image _tabStructureImg;
+    private Button _releaseProteinBtn;
+    private Image  _releaseProteinBtnImg;
+    private TMPro.TextMeshProUGUI _releaseProteinBtnText;
     private Image _tabInfoImg;
 
     // ── Dynamic containers ────────────────────────────────────────
@@ -127,11 +131,7 @@ public class PointInfoPanel : MonoBehaviour
         CheckButtonPoke();
         HandleControllerScroll();
 
-        // Slowly rotate the protein structure if the tab is active
-        if (_structureContainer != null && _structureContainer.activeInHierarchy)
-        {
-            _structureContainer.transform.Rotate(Vector3.up, 20f * Time.deltaTime, Space.Self);
-        }
+        // Rotation is handled by ProteinVisualizer itself (rotationSpeed, autoRotate)
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -169,10 +169,16 @@ public class PointInfoPanel : MonoBehaviour
 
         if (!_grabbed)
         {
-            if (rD && _rightAnchor && Vector3.Distance(_rightAnchor.position, transform.position) < GrabRadius)
-                StartGrab(_rightAnchor);
-            else if (lD && _leftAnchor && Vector3.Distance(_leftAnchor.position, transform.position) < GrabRadius)
-                StartGrab(_leftAnchor);
+            // Don't grab the panel if the user is currently holding the protein —
+            // the protein grab takes priority since it requires reaching inside the panel.
+            bool proteinGrabbed = _pdbRenderer != null && _pdbRenderer.IsGrabbed;
+            if (!proteinGrabbed)
+            {
+                if (rD && _rightAnchor && Vector3.Distance(_rightAnchor.position, transform.position) < GrabRadius)
+                    StartGrab(_rightAnchor);
+                else if (lD && _leftAnchor && Vector3.Distance(_leftAnchor.position, transform.position) < GrabRadius)
+                    StartGrab(_leftAnchor);
+            }
         }
         else
         {
@@ -251,6 +257,26 @@ public class PointInfoPanel : MonoBehaviour
         StartCoroutine(FetchDomains(sequenceId));
         StartCoroutine(FetchProteins(sequenceId));
 
+        // If the previous protein was released (free-floating), destroy its GO and build a
+        // brand-new PdbContainer as a child of the structure tab — never reuse the old reference,
+        // because _structureContainer IS that destroyed GO and AddComponent on it would fire
+        // Start() a second time on a queued-for-destruction object.
+        if (_pdbRenderer != null && _pdbRenderer.IsReleased)
+        {
+            Destroy(_pdbRenderer.gameObject);   // destroy the floating protein
+
+            _structureContainer = new GameObject("PdbContainer");
+            _structureContainer.transform.SetParent(_structureTabRT, false);
+            _structureContainer.transform.localPosition = new Vector3(0f, 0f, -40f);
+            _structureContainer.transform.localScale    = Vector3.one * 1.4f;
+            _pdbRenderer = _structureContainer.AddComponent<ProteinVisualizer>();
+        }
+
+        // Reset release button
+        if (_releaseProteinBtnText != null) _releaseProteinBtnText.text = "RELEASE PROTEIN";
+        if (_releaseProteinBtnImg  != null) _releaseProteinBtnImg.color = new Color(0.10f, 0.35f, 0.70f, 0.97f);
+        if (_releaseProteinBtn     != null) _releaseProteinBtn.interactable = true;
+
         // Activate the structure tab first so PdbContainer is active before starting the coroutine
         SetTab(0);
 
@@ -267,6 +293,24 @@ public class PointInfoPanel : MonoBehaviour
         _dragStartControllerPos = Vector3.zero;
         gameObject.SetActive(false);
         onHide?.Invoke();
+    }
+
+    void OnReleaseProteinClicked()
+    {
+        if (_pdbRenderer == null || _pdbRenderer.IsReleased) return;
+
+        // Position: 55 cm in front of the user at chest level
+        Camera cam = Camera.main;
+        Vector3 releasePos = cam != null
+            ? cam.transform.position + cam.transform.forward * 0.55f + Vector3.down * 0.25f
+            : transform.position + Vector3.forward * 0.3f;
+
+        _pdbRenderer.Release(releasePos);
+
+        // Update button to reflect the released state
+        if (_releaseProteinBtnText != null) _releaseProteinBtnText.text = "PROTEIN RELEASED";
+        if (_releaseProteinBtnImg  != null) _releaseProteinBtnImg.color = new Color(0.25f, 0.25f, 0.25f, 0.80f);
+        if (_releaseProteinBtn     != null) _releaseProteinBtn.interactable = false;
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -710,7 +754,8 @@ public class PointInfoPanel : MonoBehaviour
 
         // ── Structure Tab Content ──────────────────────────────────
         _structureTabObj = new GameObject("StructureTab");
-        var stRT = _structureTabObj.AddComponent<RectTransform>();
+        _structureTabRT  = _structureTabObj.AddComponent<RectTransform>();
+        var stRT = _structureTabRT;
         stRT.SetParent(bg, false);
         stRT.anchorMin = Vector2.zero; stRT.anchorMax = Vector2.one;
         stRT.offsetMin = new Vector2(0f, 24f); stRT.offsetMax = new Vector2(0f, -74f);
@@ -721,6 +766,29 @@ public class PointInfoPanel : MonoBehaviour
         _structureContainer.transform.localScale = Vector3.one * 1.4f; // Increased scale 7x
 
         _pdbRenderer = _structureContainer.AddComponent<ProteinVisualizer>();
+
+        // ── "Release Protein" button — pinned to bottom of structure tab ──
+        var relBtnRT = new GameObject("ReleaseProteinBtn").AddComponent<RectTransform>();
+        relBtnRT.SetParent(stRT, false);
+        relBtnRT.anchorMin        = new Vector2(0.1f, 0f);
+        relBtnRT.anchorMax        = new Vector2(0.9f, 0f);
+        relBtnRT.pivot            = new Vector2(0.5f, 0f);
+        relBtnRT.sizeDelta        = new Vector2(0f, 34f);
+        relBtnRT.anchoredPosition = new Vector2(0f, 8f);
+
+        _releaseProteinBtnImg       = relBtnRT.gameObject.AddComponent<Image>();
+        _releaseProteinBtnImg.color = new Color(0.10f, 0.35f, 0.70f, 0.97f);
+
+        _releaseProteinBtn              = relBtnRT.gameObject.AddComponent<Button>();
+        _releaseProteinBtn.targetGraphic = _releaseProteinBtnImg;
+        var rc = _releaseProteinBtn.colors;
+        rc.highlightedColor = new Color(0.20f, 0.50f, 0.90f, 1f);
+        rc.pressedColor     = new Color(0.06f, 0.22f, 0.50f, 1f);
+        _releaseProteinBtn.colors = rc;
+        _releaseProteinBtn.onClick.AddListener(OnReleaseProteinClicked);
+
+        _releaseProteinBtnText = Label(relBtnRT, font, "RELEASE PROTEIN", 11f,
+            Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
 
         // ── Scroll View Setup ─────────────────────────────────────
         var scrollViewRT = new GameObject("ScrollView").AddComponent<RectTransform>();

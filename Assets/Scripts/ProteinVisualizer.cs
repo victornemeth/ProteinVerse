@@ -11,12 +11,50 @@ public class ProteinVisualizer : MonoBehaviour
     public float ribbonThickness = 0.4f;
     public int splineDivisions = 10;
     public int radialSegments = 8;
-    public float rotationSpeed = 30f;
+    public float rotationSpeed = 8f;
     public bool autoRotate = true;
     public bool autoPosition = false;
-    
+
+    [Header("Grab Interaction")]
+    [Tooltip("World-space radius (meters) within which a pinch grabs the protein")]
+    public float grabRadius = 0.12f;
+
     private MeshFilter meshFilter;
     private MeshRenderer meshRenderer;
+
+    // OVR hand references (populated at runtime)
+    private OVRHand      _rightHand;
+    private OVRHand      _leftHand;
+    private OVRSkeleton  _rightSkel;
+    private OVRSkeleton  _leftSkel;
+    private Transform    _rightHandAnchor;
+    private Transform    _leftHandAnchor;
+
+    // Derived from mesh bounds after build; used for grab detection
+    private float        _meshBoundsRadius;
+
+    // Single-hand grab state
+    private bool         _isGrabbed;
+    private OVRHand      _grabHand;
+    private Transform    _grabAnchorTransform;
+    private Vector3      _grabLocalOffset;
+    private Quaternion   _grabRotOffset;
+
+    // Two-hand scale state
+    private bool         _isTwoHandScaling;
+    private float        _scaleAtScaleStart;
+    private float        _twoHandDistAtStart;
+    private Vector3      _midpointAtStart;
+    private Vector3      _posAtScaleStart;
+
+    private bool         _wasRPinch;
+    private bool         _wasLPinch;
+
+    /// <summary>True while the user is holding the protein.</summary>
+    public bool IsGrabbed => _isGrabbed;
+
+    /// <summary>True after Release() has been called (protein is free-floating).</summary>
+    public bool IsReleased { get; private set; }
 
     public enum SSType { Coil, Helix, Sheet }
 
@@ -47,6 +85,18 @@ public class ProteinVisualizer : MonoBehaviour
 
     void Start()
     {
+        // Find OVR hand references for grab interaction
+        var rig = FindFirstObjectByType<OVRCameraRig>();
+        if (rig != null)
+        {
+            _rightHand        = rig.rightHandAnchor.GetComponentInChildren<OVRHand>();
+            _leftHand         = rig.leftHandAnchor.GetComponentInChildren<OVRHand>();
+            _rightSkel        = rig.rightHandAnchor.GetComponentInChildren<OVRSkeleton>();
+            _leftSkel         = rig.leftHandAnchor.GetComponentInChildren<OVRSkeleton>();
+            _rightHandAnchor  = rig.rightHandAnchor;
+            _leftHandAnchor   = rig.leftHandAnchor;
+        }
+
         // Setup components
         meshFilter = gameObject.AddComponent<MeshFilter>();
         meshRenderer = gameObject.AddComponent<MeshRenderer>();
@@ -77,11 +127,147 @@ public class ProteinVisualizer : MonoBehaviour
 
     void Update()
     {
-        if (autoRotate)
+        // Only allow grab interaction once the protein has been released from the panel
+        if (!IsReleased)
         {
-            // Rotate the entire game object on its Y axis smoothly
-            transform.Rotate(Vector3.up * rotationSpeed * Time.deltaTime, Space.World);
+            if (autoRotate)
+                transform.Rotate(Vector3.up * rotationSpeed * Time.deltaTime, Space.World);
+            return;
         }
+
+        bool rP = _rightHand != null && _rightHand.IsTracked
+               && _rightHand.GetFingerIsPinching(OVRHand.HandFinger.Index);
+        bool lP = _leftHand  != null && _leftHand.IsTracked
+               && _leftHand.GetFingerIsPinching(OVRHand.HandFinger.Index);
+        bool rDown = rP && !_wasRPinch;
+        bool lDown = lP && !_wasLPinch;
+        _wasRPinch = rP;
+        _wasLPinch = lP;
+
+        Vector3 rTip = GetFingertipPosition(_rightSkel, _rightHandAnchor);
+        Vector3 lTip = GetFingertipPosition(_leftSkel,  _leftHandAnchor);
+
+        // ── Two-hand scale (takes priority over single-hand grab) ────────
+        if (rP && lP)
+        {
+            if (!_isTwoHandScaling)
+            {
+                // Transition into two-hand mode: snapshot everything
+                _isTwoHandScaling      = true;
+                _isGrabbed             = false;   // release any single-hand grab
+                _grabHand              = null;
+                _grabAnchorTransform   = null;
+                _scaleAtScaleStart     = transform.localScale.x;
+                _twoHandDistAtStart    = Mathf.Max(Vector3.Distance(rTip, lTip), 0.001f);
+                _midpointAtStart       = (rTip + lTip) * 0.5f;
+                _posAtScaleStart       = transform.position;
+            }
+            else
+            {
+                float newDist  = Mathf.Max(Vector3.Distance(rTip, lTip), 0.001f);
+                float newScale = Mathf.Clamp(
+                    _scaleAtScaleStart * (newDist / _twoHandDistAtStart),
+                    0.0005f, 0.05f);
+                transform.localScale = Vector3.one * newScale;
+
+                // Translate so the midpoint between hands tracks the protein centre
+                Vector3 midNow = (rTip + lTip) * 0.5f;
+                transform.position = _posAtScaleStart + (midNow - _midpointAtStart);
+            }
+            return;
+        }
+
+        // Both hands no longer both pinching — exit two-hand mode
+        if (_isTwoHandScaling)
+        {
+            _isTwoHandScaling = false;
+            // Snapshot current state so a single-hand grab can pick up smoothly
+        }
+
+        // ── Single-hand grab ─────────────────────────────────────────────
+        if (_isGrabbed)
+        {
+            bool still = _grabHand == _rightHand ? rP : lP;
+            if (still)
+            {
+                transform.position = _grabAnchorTransform.position
+                                   + _grabAnchorTransform.rotation * _grabLocalOffset;
+                transform.rotation = _grabAnchorTransform.rotation * _grabRotOffset;
+            }
+            else
+            {
+                _isGrabbed           = false;
+                _grabHand            = null;
+                _grabAnchorTransform = null;
+            }
+            return;
+        }
+
+        // Rising-edge only so we don't fight the panel grab on the same frame
+        if (rDown) TryStartGrab(_rightHand, _rightHandAnchor, rTip);
+        if (lDown && !_isGrabbed) TryStartGrab(_leftHand, _leftHandAnchor, lTip);
+    }
+
+    void TryStartGrab(OVRHand hand, Transform anchor, Vector3 fingertip)
+    {
+        if (hand == null || anchor == null) return;
+
+        // Grab anywhere within the protein's bounding sphere + 6 cm buffer
+        float worldRadius = _meshBoundsRadius > 0f
+            ? _meshBoundsRadius * transform.lossyScale.x + 0.06f
+            : grabRadius;
+
+        if (Vector3.Distance(fingertip, transform.position) > worldRadius) return;
+
+        _isGrabbed           = true;
+        _grabHand            = hand;
+        _grabAnchorTransform = anchor;
+        // Store protein's position and rotation in anchor-local space
+        _grabLocalOffset     = Quaternion.Inverse(anchor.rotation) * (transform.position - anchor.position);
+        _grabRotOffset       = Quaternion.Inverse(anchor.rotation) * transform.rotation;
+    }
+
+    /// <summary>
+    /// Detaches the protein from the panel, moves it to <paramref name="worldPosition"/>,
+    /// scales it up for easier interaction, and stops auto-rotation.
+    /// </summary>
+    public void Release(Vector3 worldPosition)
+    {
+        transform.SetParent(null, worldPositionStays: true);
+        transform.position   = worldPosition;
+        transform.localScale *= 3f;   // larger target for grabbing
+        autoRotate           = false;
+        IsReleased           = true;
+        _isGrabbed           = false;
+        _wasRPinch           = false;
+        _wasLPinch           = false;
+    }
+
+    // Returns the world-space index fingertip position.
+    // Quest 3 uses XRHandRight skeleton — bone IDs collide with the legacy Hand_* system,
+    // so we detect the skeleton type at runtime (same approach as UmapPointCloud).
+    Vector3 GetFingertipPosition(OVRSkeleton skel, Transform fallbackAnchor)
+    {
+        if (skel != null && skel.IsInitialized)
+        {
+            bool isXR = skel.GetSkeletonType() == OVRSkeleton.SkeletonType.XRHandRight
+                     || skel.GetSkeletonType() == OVRSkeleton.SkeletonType.XRHandLeft;
+
+            OVRSkeleton.BoneId tipId    = isXR ? OVRSkeleton.BoneId.XRHand_IndexTip
+                                               : OVRSkeleton.BoneId.Hand_IndexTip;
+            OVRSkeleton.BoneId distalId = isXR ? OVRSkeleton.BoneId.XRHand_IndexDistal
+                                               : OVRSkeleton.BoneId.Hand_Index3;
+
+            Vector3 distalPos   = Vector3.zero;
+            bool    foundDistal = false;
+            foreach (var b in skel.Bones)
+            {
+                if (b.Id == tipId)    return b.Transform.position;
+                if (b.Id == distalId) { distalPos = b.Transform.position; foundDistal = true; }
+            }
+            if (foundDistal) return distalPos;
+        }
+        return fallbackAnchor != null ? fallbackAnchor.position : Vector3.zero;
     }
 
     IEnumerator FetchAndRenderPDB()
@@ -593,5 +779,9 @@ public class ProteinVisualizer : MonoBehaviour
         mesh.RecalculateBounds();
 
         meshFilter.mesh = mesh;
+
+        // Store local-space bounding sphere radius; world-space grab radius is computed
+        // at grab-time using lossyScale so it stays correct after Release() scales the protein.
+        _meshBoundsRadius = mesh.bounds.extents.magnitude;
     }
 }
