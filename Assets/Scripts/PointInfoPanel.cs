@@ -73,8 +73,12 @@ public class PointInfoPanel : MonoBehaviour
     private RectTransform _assocProtSectionRT;
     private RectTransform _proteinStatusRT;
 
-    // ── Close button (for fingertip poke detection) ───────────────
-    private Transform _closeBtnTransform;
+    // ── Button poke detection (fingertip proximity) ───────────────
+    private RectTransform _closeBtnRT;
+    private RectTransform _pinBtnRT;
+    private RectTransform _releaseBtnRT;
+    private RectTransform _tabStructRT;
+    private RectTransform _tabInfoRT;
 
     /// <summary>Fired whenever the panel hides itself (close button, click-off, etc.).</summary>
     public System.Action onHide;
@@ -91,7 +95,8 @@ public class PointInfoPanel : MonoBehaviour
     private Transform  _grabAnchor;
     private Vector3    _grabLocalOffset;   // offset in anchor's local space (preserves pos under rotation)
     private Quaternion _grabRotOffset;     // panel rotation relative to anchor rotation at grab start
-    private bool       _wasRPinch, _wasLPinch, _wasPoking;
+    private bool       _wasRPinch, _wasLPinch;
+    private bool       _wasPokingClose, _wasPokingPin, _wasPokingRelease, _wasPokingTabStruct, _wasPokingTabInfo;
 
     // ── Controller scroll ─────────────────────────────────────────
     private Transform  _rightAimAnchor;
@@ -227,14 +232,30 @@ public class PointInfoPanel : MonoBehaviour
     //  Close-button fingertip poke
     // ─────────────────────────────────────────────────────────────
 
+    // Radius (world-space metres) within which an index fingertip triggers a button.
+    private const float PokeRadius = 0.045f;
+
     void CheckButtonPoke()
     {
-        if (_closeBtnTransform == null) return;
-        // Button pivot is right-edge; step left by half button width (22 mm)
-        Vector3 c = _closeBtnTransform.position - _closeBtnTransform.right * 0.022f;
-        bool p = IndexTipNear(_rightSkel, c, 0.03f) || IndexTipNear(_leftSkel, c, 0.03f);
-        if (p && !_wasPoking) Hide();
-        _wasPoking = p;
+        PokeCheck(_closeBtnRT,   ref _wasPokingClose,      Hide);
+        PokeCheck(_pinBtnRT,     ref _wasPokingPin,         OnPinBtnClicked);
+        PokeCheck(_releaseBtnRT, ref _wasPokingRelease,     OnReleaseRecallBtnClicked);
+        PokeCheck(_tabStructRT,  ref _wasPokingTabStruct,   () => SetTab(0));
+        PokeCheck(_tabInfoRT,    ref _wasPokingTabInfo,     () => SetTab(1));
+    }
+
+    /// <summary>
+    /// Fires <paramref name="onDown"/> once when either index fingertip enters the world-space
+    /// sphere centred on <paramref name="rt"/>'s rect centre with radius <see cref="PokeRadius"/>.
+    /// Uses rising-edge detection so holding the finger on the button doesn't repeat.
+    /// </summary>
+    void PokeCheck(RectTransform rt, ref bool was, System.Action onDown)
+    {
+        if (rt == null || !rt.gameObject.activeInHierarchy) { was = false; return; }
+        Vector3 c = rt.TransformPoint(rt.rect.center);
+        bool p = IndexTipNear(_rightSkel, c, PokeRadius) || IndexTipNear(_leftSkel, c, PokeRadius);
+        if (p && !was) onDown();
+        was = p;
     }
 
     bool IndexTipNear(OVRSkeleton sk, Vector3 pt, float r)
@@ -786,7 +807,7 @@ public class PointInfoPanel : MonoBehaviour
         var cbc   = cb.colors; cbc.highlightedColor = new Color(0.85f, 0.20f, 0.20f);
         cbc.pressedColor = new Color(0.40f, 0.06f, 0.06f); cb.colors = cbc;
         cb.onClick.AddListener(Hide);
-        _closeBtnTransform = cbRT.transform;
+        _closeBtnRT = cbRT;
         var cbXRT = Stretch("X", cbRT.transform);
         Label(cbXRT, font, "X", 18f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
 
@@ -805,6 +826,7 @@ public class PointInfoPanel : MonoBehaviour
         pbc.pressedColor     = new Color(0.12f, 0.14f, 0.30f, 1f);
         pinBtn.colors = pbc;
         pinBtn.onClick.AddListener(OnPinBtnClicked);
+        _pinBtnRT = pinRT;
         _pinBtnText = Label(pinRT, font, "PIN", 11f, new Color(0.7f, 0.8f, 1f), FontStyles.Bold, TextAlignmentOptions.Center);
 
         // ── Tabs ──────────────────────────────────────────────────
@@ -820,6 +842,7 @@ public class PointInfoPanel : MonoBehaviour
         _tabStructureBtn = tsRT.gameObject.AddComponent<Button>();
         _tabStructureBtn.targetGraphic = _tabStructureImg;
         _tabStructureBtn.onClick.AddListener(() => SetTab(0));
+        _tabStructRT = tsRT;
         Label(tsRT, font, "STRUCTURE", 11f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
         
         // Info Tab
@@ -831,6 +854,7 @@ public class PointInfoPanel : MonoBehaviour
         _tabInfoBtn = tiRT.gameObject.AddComponent<Button>();
         _tabInfoBtn.targetGraphic = _tabInfoImg;
         _tabInfoBtn.onClick.AddListener(() => SetTab(1));
+        _tabInfoRT = tiRT;
         Label(tiRT, font, "INFO", 11f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
 
         // ── Structure Tab Content ──────────────────────────────────
@@ -867,6 +891,7 @@ public class PointInfoPanel : MonoBehaviour
         rc.pressedColor     = new Color(0.06f, 0.22f, 0.50f, 1f);
         _releaseProteinBtn.colors = rc;
         _releaseProteinBtn.onClick.AddListener(OnReleaseRecallBtnClicked);
+        _releaseBtnRT = relBtnRT;
 
         _releaseProteinBtnText = Label(relBtnRT, font, "RELEASE PROTEIN", 11f,
             Color.white, FontStyles.Bold, TextAlignmentOptions.Center);

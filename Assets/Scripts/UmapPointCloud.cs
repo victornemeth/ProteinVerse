@@ -74,7 +74,10 @@ public class UmapPointCloud : MonoBehaviour
     private Mesh         cloudMesh;
     private Material     cloudMaterial;
     private MeshRenderer cloudRenderer;
-    private Color32[]    _meshColors;  // CPU copy of vertex colors for runtime pin-color updates
+    private Color32[]    _meshColors;       // CPU copy of vertex colors for runtime pin-color updates
+    private Color32[]    _metadataColors;   // per-point colors loaded from local binary (detection method)
+    private bool         _isMetadataColorMode = false;
+    public  bool         IsMetadataColorMode => _isMetadataColorMode;
 
     private static readonly int ShaderPointSize = Shader.PropertyToID("_PointSize");
     private static readonly int ShaderMoveTint  = Shader.PropertyToID("_MoveTint");
@@ -173,6 +176,7 @@ public class UmapPointCloud : MonoBehaviour
         SetupAimRay();
         SetupHighlightMarker();
         StartCoroutine(LoadCSV());
+        StartCoroutine(LoadMetadataColors());
 
         // Deselect the point whenever the info panel is closed (close button, or click-off)
         if (infoPanel != null)
@@ -344,6 +348,77 @@ public class UmapPointCloud : MonoBehaviour
         float.TryParse(s.Trim(),
                        System.Globalization.NumberStyles.Float,
                        System.Globalization.CultureInfo.InvariantCulture, out v);
+
+    // ─────────────────────────────────────────────────────────────
+    //  Metadata Color Loading
+    // ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Loads the per-point RGB binary from StreamingAssets (3 bytes per point, matching CSV order).
+    /// File: color_detection_method_RBPdetect2.bin — produced by the download script.
+    /// </summary>
+    IEnumerator LoadMetadataColors()
+    {
+        string path = Path.Combine(Application.streamingAssetsPath, "color_detection_method_RBPdetect2.bin");
+
+#if UNITY_ANDROID && !UNITY_EDITOR
+        using var req = UnityWebRequest.Get(path);
+        yield return req.SendWebRequest();
+        if (req.result != UnityWebRequest.Result.Success)
+        { Debug.LogWarning($"[UmapPointCloud] Could not load metadata colors: {req.error}"); yield break; }
+        byte[] raw = req.downloadHandler.data;
+#else
+        if (!File.Exists(path))
+        { Debug.LogWarning($"[UmapPointCloud] Metadata color file not found: {path}"); yield break; }
+        byte[] raw = File.ReadAllBytes(path);
+        yield return null;
+#endif
+
+        int n = raw.Length / 3;
+        _metadataColors = new Color32[n * 4]; // 4 verts per point
+        for (int i = 0; i < n; i++)
+        {
+            var c = new Color32(raw[i * 3], raw[i * 3 + 1], raw[i * 3 + 2], 255);
+            for (int k = 0; k < 4; k++)
+                _metadataColors[i * 4 + k] = c;
+        }
+        Debug.Log($"[UmapPointCloud] Loaded metadata colors for {n} points.");
+    }
+
+    /// <summary>
+    /// Toggles between viridis (depth-based) coloring and the metadata color scheme.
+    /// Pinned point colors are preserved on top of whichever base is active.
+    /// </summary>
+    public void ToggleMetadataColors()
+    {
+        if (_meshColors == null || cloudMesh == null) return;
+        if (_metadataColors == null) { Debug.LogWarning("[UmapPointCloud] Metadata colors not loaded yet."); return; }
+
+        _isMetadataColorMode = !_isMetadataColorMode;
+
+        // Rebuild base colors from the appropriate source
+        Color32[] source = _isMetadataColorMode ? _metadataColors : null;
+        for (int i = 0; i < pointCount; i++)
+        {
+            Color32 c = source != null ? source[i * 4] : (Color32)pointColors[i];
+            for (int k = 0; k < 4; k++)
+                _meshColors[i * 4 + k] = c;
+        }
+
+        // Re-apply pinned point colors on top (they override the base)
+        foreach (var kvp in _pinnedPanels)
+        {
+            int idx = kvp.CurrentPointIndex;
+            if (idx >= 0 && idx < pointCount)
+            {
+                Color32 pc = kvp.PinColor;
+                for (int k = 0; k < 4; k++)
+                    _meshColors[idx * 4 + k] = pc;
+            }
+        }
+
+        cloudMesh.colors32 = _meshColors;
+    }
 
     // ─────────────────────────────────────────────────────────────
     //  Mesh + Renderer Initialisation
@@ -852,7 +927,10 @@ static Color Viridis(float t)
     void RestorePointColor(int index)
     {
         if (pointColors == null || index < 0 || index >= pointCount) return;
-        SetPointColor(index, pointColors[index]);
+        Color baseColor = (_isMetadataColorMode && _metadataColors != null)
+            ? (Color)_metadataColors[index * 4]
+            : pointColors[index];
+        SetPointColor(index, baseColor);
         DestroyPinnedMarker(index);
     }
 

@@ -11,7 +11,7 @@ public class WatchMenu : MonoBehaviour
     // ── Configuration ────────────────────────────────────────────────
     [Header("Menu Appearance")]
     public float panelWidth = 140f;
-    public float panelHeight = 160f;
+    public float panelHeight = 220f;
     [Tooltip("Overall scale of the menu in the world. Reduce this to make everything (including fonts) smaller.")]
     public float globalScale = 0.0004f; // slightly larger text for palm
     [Tooltip("Offset relative to the wrist bone (moves menu to the palm center)")]
@@ -38,10 +38,14 @@ public class WatchMenu : MonoBehaviour
     private UmapPointCloud  _pointCloud;
     private TextMeshProUGUI _toggleMoveText;
     private Image           _toggleMoveBtnImg;
+    private TextMeshProUGUI _colorModeText;
+    private Image           _colorModeBtnImg;
 
     // Button colors for each mode
-    static readonly Color ColorSelectMode = new Color(0.08f, 0.10f, 0.25f, 0.97f);  // dark navy
-    static readonly Color ColorMoveMode   = new Color(0.10f, 0.55f, 0.18f, 0.97f);  // vivid green
+    static readonly Color ColorSelectMode   = new Color(0.08f, 0.10f, 0.25f, 0.97f);  // dark navy
+    static readonly Color ColorMoveMode     = new Color(0.10f, 0.55f, 0.18f, 0.97f);  // vivid green
+    static readonly Color ColorViridis      = new Color(0.08f, 0.10f, 0.25f, 0.97f);  // dark navy (off)
+    static readonly Color ColorMetadata     = new Color(0.55f, 0.22f, 0.00f, 0.97f);  // amber (on)
 
     void Start()
     {
@@ -67,16 +71,28 @@ public class WatchMenu : MonoBehaviour
         if (_pointCloud != null && _toggleMoveText != null)
         {
             bool moving = _pointCloud.isMovementEnabled;
-
             string expectedText = moving ? "MOVE MODE\nON" : "SELECT MODE\nOFF";
             if (_toggleMoveText.text != expectedText)
                 _toggleMoveText.text = expectedText;
-
             if (_toggleMoveBtnImg != null)
             {
                 Color target = moving ? ColorMoveMode : ColorSelectMode;
                 if (_toggleMoveBtnImg.color != target)
                     _toggleMoveBtnImg.color = target;
+            }
+        }
+
+        if (_pointCloud != null && _colorModeText != null)
+        {
+            bool meta = _pointCloud.IsMetadataColorMode;
+            string expectedText = meta ? "COLOR\nRBPdetect2\nON" : "COLOR\nRBPdetect2\nOFF";
+            if (_colorModeText.text != expectedText)
+                _colorModeText.text = expectedText;
+            if (_colorModeBtnImg != null)
+            {
+                Color target = meta ? ColorMetadata : ColorViridis;
+                if (_colorModeBtnImg.color != target)
+                    _colorModeBtnImg.color = target;
             }
         }
 
@@ -209,13 +225,12 @@ public class WatchMenu : MonoBehaviour
         titleRT.offsetMax = new Vector2(-12f, 0f);
         Label(titleRT, font, "PALM MENU", 12f, new Color(0.85f, 0.92f, 1f), FontStyles.Bold, TextAlignmentOptions.Center);
 
-        // 4. Move Mode Toggle — fills entire panel below the header
+        // 4a. Move Mode Toggle — top half of the panel (below the header)
         var btnRT = new GameObject("MoveModeBtn").AddComponent<RectTransform>();
         btnRT.SetParent(bgRT, false);
-        // Stretch to fill, leaving a small margin on all sides except the top where the header sits
-        btnRT.anchorMin = Vector2.zero;
+        btnRT.anchorMin = new Vector2(0f, 0.5f);
         btnRT.anchorMax = Vector2.one;
-        btnRT.offsetMin = new Vector2(6f,  6f);   // 6 px bottom & sides
+        btnRT.offsetMin = new Vector2(6f,  3f);   // 3 px gap at middle, 6 px sides
         btnRT.offsetMax = new Vector2(-6f, -36f); // 6 px sides; 36 px from top (30 header + 6 gap)
 
         bool initialMoving = _pointCloud != null && _pointCloud.isMovementEnabled;
@@ -226,17 +241,43 @@ public class WatchMenu : MonoBehaviour
         var btn = btnRT.gameObject.AddComponent<Button>();
         btn.targetGraphic = btnImg;
         var colors = btn.colors;
-        colors.normalColor      = Color.white;                          // let Image.color drive the base
-        colors.highlightedColor = new Color(1.18f, 1.18f, 1.18f, 1f);  // brighten on hover
-        colors.pressedColor     = new Color(0.75f, 0.75f, 0.75f, 1f);  // darken on press
+        colors.normalColor      = Color.white;
+        colors.highlightedColor = new Color(1.18f, 1.18f, 1.18f, 1f);
+        colors.pressedColor     = new Color(0.75f, 0.75f, 0.75f, 1f);
         colors.colorMultiplier  = 1f;
         btn.colors = colors;
 
         string initialText = initialMoving ? "MOVE MODE\nON" : "SELECT MODE\nOFF";
-        _toggleMoveText = Label(btnRT, font, initialText, 22f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
-
+        _toggleMoveText = Label(btnRT, font, initialText, 18f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
         _toggleMoveBtnImg = btnImg;
         btn.onClick.AddListener(OnToggleMoveModeClicked);
+
+        // 4b. Color Mode Toggle — bottom half of the panel
+        var colorBtnRT = new GameObject("ColorModeBtn").AddComponent<RectTransform>();
+        colorBtnRT.SetParent(bgRT, false);
+        colorBtnRT.anchorMin = Vector2.zero;
+        colorBtnRT.anchorMax = new Vector2(1f, 0.5f);
+        colorBtnRT.offsetMin = new Vector2(6f,  6f);   // 6 px bottom & sides
+        colorBtnRT.offsetMax = new Vector2(-6f, -3f);  // 3 px gap at middle, 6 px sides
+
+        bool initialMeta = _pointCloud != null && _pointCloud.IsMetadataColorMode;
+        var colorBtnImg = colorBtnRT.gameObject.AddComponent<Image>();
+        colorBtnImg.color = initialMeta ? ColorMetadata : ColorViridis;
+        colorBtnImg.raycastTarget = true;
+
+        var colorBtn = colorBtnRT.gameObject.AddComponent<Button>();
+        colorBtn.targetGraphic = colorBtnImg;
+        var colorColors = colorBtn.colors;
+        colorColors.normalColor      = Color.white;
+        colorColors.highlightedColor = new Color(1.18f, 1.18f, 1.18f, 1f);
+        colorColors.pressedColor     = new Color(0.75f, 0.75f, 0.75f, 1f);
+        colorColors.colorMultiplier  = 1f;
+        colorBtn.colors = colorColors;
+
+        string initialColorText = initialMeta ? "COLOR\nRBPdetect2\nON" : "COLOR\nRBPdetect2\nOFF";
+        _colorModeText = Label(colorBtnRT, font, initialColorText, 14f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
+        _colorModeBtnImg = colorBtnImg;
+        colorBtn.onClick.AddListener(OnToggleColorModeClicked);
     }
 
     void EnsureEventSystemHasPointableCanvasModule()
@@ -267,7 +308,7 @@ public class WatchMenu : MonoBehaviour
         plane.InjectAllPlaneSurface(PlaneSurface.NormalFacing.Backward, true);
 
         var clip = surfGO.AddComponent<BoundsClipper>();
-        clip.Size = new Vector3(panelWidth, panelHeight, 500f); // Generous 500 depth ensures absolutely no poke skipping
+        clip.Size = new Vector3(panelWidth, panelHeight, 500f);
 
         var cps = surfGO.AddComponent<ClippedPlaneSurface>();
         cps.InjectAllClippedPlaneSurface(plane, new IBoundsClipper[] { clip });
@@ -283,6 +324,13 @@ public class WatchMenu : MonoBehaviour
     {
         if (_pointCloud == null) return;
         _pointCloud.isMovementEnabled = !_pointCloud.isMovementEnabled;
+        // Update() will sync text and color on the next frame.
+    }
+
+    private void OnToggleColorModeClicked()
+    {
+        if (_pointCloud == null) return;
+        _pointCloud.ToggleMetadataColors();
         // Update() will sync text and color on the next frame.
     }
 
