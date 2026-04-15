@@ -395,6 +395,11 @@ public class UmapPointCloud : MonoBehaviour
     {
         if (_meshColors == null || cloudMesh == null) return;
         if (_metadataColors == null) { Debug.LogWarning("[UmapPointCloud] Metadata colors not loaded yet."); return; }
+        if (_metadataColors.Length != pointCount * 4)
+        {
+            Debug.LogError($"[UmapPointCloud] Metadata color count mismatch: binary has {_metadataColors.Length / 4} points, cloud has {pointCount}. Regenerate the binary.");
+            return;
+        }
 
         _isMetadataColorMode = !_isMetadataColorMode;
 
