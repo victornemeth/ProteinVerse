@@ -48,6 +48,23 @@ public class PointInfoPanel : MonoBehaviour
     private TMPro.TextMeshProUGUI _releaseProteinBtnText;
     private Image _tabInfoImg;
 
+    // ── Pin state ─────────────────────────────────────────────────
+    private bool   _isPinned;
+    private Color  _pinColor = new Color(0f, 0.9f, 0.9f);
+    private int    _currentPointIndex = -1;
+    private Image  _headerBgImg;
+    private Image  _pinBtnImg;
+    private TextMeshProUGUI _pinBtnText;
+
+    public bool IsPinned          => _isPinned;
+    public int  CurrentPointIndex => _currentPointIndex;
+
+    /// <summary>Fired when the user pins this panel; passes (pointIndex, pinColor).</summary>
+    public System.Action<int, Color> onPin;
+
+    /// <summary>The color assigned to this panel when pinned. Set externally before showing.</summary>
+    public Color PinColor { get => _pinColor; set => _pinColor = value; }
+
     // ── Dynamic containers ────────────────────────────────────────
     private RectTransform _domainBarsRT;    // backbone + coloured domain bars
     private RectTransform _domainLegendRT;  // text legend rows
@@ -233,9 +250,19 @@ public class PointInfoPanel : MonoBehaviour
     //  Public API
     // ─────────────────────────────────────────────────────────────
 
-    public void Show(Transform camera, string sequenceId, Vector3 rawUmap)
+    public void Show(Transform camera, string sequenceId, Vector3 rawUmap, int pointIndex = -1)
     {
         if (_umapText == null) { Debug.LogWarning("[PointInfoPanel] Not built yet."); return; }
+
+        _currentPointIndex = pointIndex;
+
+        // Reset pin visuals when re-using this panel for a new point (only while not yet pinned)
+        if (!_isPinned)
+        {
+            if (_pinBtnImg  != null) _pinBtnImg.color  = new Color(0.20f, 0.22f, 0.45f, 1f);
+            if (_pinBtnText != null) { _pinBtnText.text = "PIN"; _pinBtnText.color = new Color(0.7f, 0.8f, 1f); }
+            if (_headerBgImg != null) _headerBgImg.color = new Color(0.12f, 0.14f, 0.36f, 1f);
+        }
 
         if (camera != null)
         {
@@ -288,6 +315,10 @@ public class PointInfoPanel : MonoBehaviour
 
     public void Hide()
     {
+        // If the protein was released (floating free), destroy it with the panel
+        if (_pdbRenderer != null && _pdbRenderer.IsReleased)
+            Destroy(_pdbRenderer.gameObject);
+
         _grabbed    = false;
         _grabAnchor = null;
         _dragStartControllerPos = Vector3.zero;
@@ -320,6 +351,25 @@ public class PointInfoPanel : MonoBehaviour
             if (_releaseProteinBtnText != null) _releaseProteinBtnText.text = "RELEASE PROTEIN";
             if (_releaseProteinBtnImg  != null) _releaseProteinBtnImg.color = new Color(0.10f, 0.35f, 0.70f, 0.97f);
         }
+    }
+
+    void OnPinBtnClicked()
+    {
+        if (_isPinned) return;  // already pinned; only UmapPointCloud can un-pin (by closing)
+        _isPinned = true;
+
+        // Tint header and button to pin color
+        if (_headerBgImg != null)
+            _headerBgImg.color = Color.Lerp(_pinColor, new Color(0.05f, 0.07f, 0.15f), 0.55f);
+        if (_pinBtnImg != null)
+            _pinBtnImg.color = _pinColor;
+        if (_pinBtnText != null)
+        {
+            _pinBtnText.text  = "PINNED";
+            _pinBtnText.color = new Color(0.05f, 0.05f, 0.10f);
+        }
+
+        onPin?.Invoke(_currentPointIndex, _pinColor);
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -714,14 +764,15 @@ public class PointInfoPanel : MonoBehaviour
 
         // ── Header (44 units)
         var hdrRT = Pin("Header", bg, 0f, 44f);
-        hdrRT.gameObject.AddComponent<Image>().color = new Color(0.12f, 0.14f, 0.36f, 1f);
+        _headerBgImg = hdrRT.gameObject.AddComponent<Image>();
+        _headerBgImg.color = new Color(0.12f, 0.14f, 0.36f, 1f);
 
         var titleRT = Stretch("Title", hdrRT.transform);
         ((RectTransform)titleRT.transform).offsetMin = new Vector2(12f, 0f);
-        ((RectTransform)titleRT.transform).offsetMax = new Vector2(-52f, 0f);
+        ((RectTransform)titleRT.transform).offsetMax = new Vector2(-96f, 0f);  // room for PIN + X
         Label(titleRT, font, "Protein Info", 15f, new Color(0.85f, 0.92f, 1f), FontStyles.Bold, TextAlignmentOptions.MidlineLeft);
 
-        // Close button
+        // Close button (rightmost)
         var cbRT = new GameObject("CloseBtn").AddComponent<RectTransform>();
         cbRT.SetParent(hdrRT, false);
         cbRT.anchorMin = new Vector2(1f, 0f); cbRT.anchorMax = Vector2.one;
@@ -734,6 +785,23 @@ public class PointInfoPanel : MonoBehaviour
         _closeBtnTransform = cbRT.transform;
         var cbXRT = Stretch("X", cbRT.transform);
         Label(cbXRT, font, "X", 18f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
+
+        // PIN button (just left of close button)
+        var pinRT = new GameObject("PinBtn").AddComponent<RectTransform>();
+        pinRT.SetParent(hdrRT, false);
+        pinRT.anchorMin        = new Vector2(1f, 0f); pinRT.anchorMax = Vector2.one;
+        pinRT.pivot            = new Vector2(1f, 0.5f);
+        pinRT.sizeDelta        = new Vector2(44f, 0f);
+        pinRT.anchoredPosition = new Vector2(-44f, 0f);
+        _pinBtnImg = pinRT.gameObject.AddComponent<Image>();
+        _pinBtnImg.color = new Color(0.20f, 0.22f, 0.45f, 1f);
+        var pinBtn = pinRT.gameObject.AddComponent<Button>(); pinBtn.targetGraphic = _pinBtnImg;
+        var pbc = pinBtn.colors;
+        pbc.highlightedColor = new Color(0.32f, 0.35f, 0.65f, 1f);
+        pbc.pressedColor     = new Color(0.12f, 0.14f, 0.30f, 1f);
+        pinBtn.colors = pbc;
+        pinBtn.onClick.AddListener(OnPinBtnClicked);
+        _pinBtnText = Label(pinRT, font, "PIN", 11f, new Color(0.7f, 0.8f, 1f), FontStyles.Bold, TextAlignmentOptions.Center);
 
         // ── Tabs ──────────────────────────────────────────────────
         var tabBarRT = Pin("TabBar", bg, -44f, 30f);

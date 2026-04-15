@@ -74,6 +74,7 @@ public class UmapPointCloud : MonoBehaviour
     private Mesh         cloudMesh;
     private Material     cloudMaterial;
     private MeshRenderer cloudRenderer;
+    private Color32[]    _meshColors;  // CPU copy of vertex colors for runtime pin-color updates
 
     private static readonly int ShaderPointSize = Shader.PropertyToID("_PointSize");
     private static readonly int ShaderMoveTint  = Shader.PropertyToID("_MoveTint");
@@ -123,6 +124,21 @@ public class UmapPointCloud : MonoBehaviour
     private bool wasRightPinch;
     private bool wasLeftPinch;
 
+    // ── Pinned panels ─────────────────────────────────────────────
+    private readonly System.Collections.Generic.List<PointInfoPanel> _pinnedPanels =
+        new System.Collections.Generic.List<PointInfoPanel>();
+    private readonly System.Collections.Generic.Dictionary<int, GameObject> _pinnedMarkers =
+        new System.Collections.Generic.Dictionary<int, GameObject>();
+    private int _nextPinColorIdx = 0;
+    private static readonly Color[] PinColors = {
+        new Color(1.00f, 0.45f, 0.00f),  // orange
+        new Color(0.95f, 0.15f, 0.85f),  // pink
+        new Color(0.60f, 0.15f, 1.00f),  // purple
+        new Color(0.90f, 0.90f, 0.00f),  // yellow
+        new Color(0.15f, 1.00f, 0.15f),  // green
+        new Color(1.00f, 0.20f, 0.20f),  // red
+    };
+
     // ─────────────────────────────────────────────────────────────
     //  Unity Lifecycle
     // ─────────────────────────────────────────────────────────────
@@ -156,7 +172,7 @@ public class UmapPointCloud : MonoBehaviour
 
         // Deselect the point whenever the info panel is closed (close button, or click-off)
         if (infoPanel != null)
-            infoPanel.onHide += () => { selectedIndex = -1; infoLabel?.gameObject.SetActive(false); };
+            WireActivePanel(infoPanel);
     }
 
     void SetupAimRay()
@@ -204,10 +220,13 @@ public class UmapPointCloud : MonoBehaviour
 
         HandleInteraction();
 
-        // Keep point size proportional to the cloud's world-space scale.
+        // When the cloud scale changes, keep selection/pin markers at constant world size.
         if (transform.hasChanged)
         {
-            cloudMaterial.SetFloat(ShaderPointSize, basePointSize * transform.localScale.x);
+            float invScale = transform.localScale.x > 1e-5f ? 1f / transform.localScale.x : 1f;
+            foreach (var kvp in _pinnedMarkers)
+                if (kvp.Value != null)
+                    kvp.Value.transform.localScale = Vector3.one * basePointSize * 1.5f * invScale;
             transform.hasChanged = false;
         }
 
@@ -233,6 +252,8 @@ public class UmapPointCloud : MonoBehaviour
         if (nativeResultIndex.IsCreated) nativeResultIndex.Dispose();
         if (cloudMesh != null)     Destroy(cloudMesh);
         if (cloudMaterial != null) Destroy(cloudMaterial);
+        foreach (var go in _pinnedMarkers.Values) if (go != null) Destroy(go);
+        _pinnedMarkers.Clear();
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -370,6 +391,8 @@ public class UmapPointCloud : MonoBehaviour
             tris[ti+3] = v0;   tris[ti+4] = v0+3; tris[ti+5] = v0+2;
         }
 
+        _meshColors = cols;  // keep CPU copy so we can recolor individual points at runtime
+
         cloudMesh          = new Mesh { name = "PointCloudMesh" };
         cloudMesh.vertices = verts;
         cloudMesh.uv       = uvs;
@@ -377,7 +400,7 @@ public class UmapPointCloud : MonoBehaviour
         cloudMesh.triangles = tris;
         // Local bounds cover the normalised [-0.5, 0.5]³ cloud with a little margin.
         cloudMesh.bounds   = new Bounds(Vector3.zero, Vector3.one * 1.5f);
-        cloudMesh.UploadMeshData(true);  // send to GPU and free CPU copy
+        // Note: not calling UploadMeshData(true) so we can update vertex colors for pinned points
 
         var mf         = gameObject.AddComponent<MeshFilter>();
         mf.sharedMesh  = cloudMesh;
@@ -387,7 +410,7 @@ public class UmapPointCloud : MonoBehaviour
         cloudRenderer.shadowCastingMode  = UnityEngine.Rendering.ShadowCastingMode.Off;
         cloudRenderer.receiveShadows     = false;
 
-        cloudMaterial.SetFloat(ShaderPointSize, basePointSize * transform.localScale.x);
+        cloudMaterial.SetFloat(ShaderPointSize, basePointSize);
 
         Debug.Log($"[UmapPointCloud] Mesh ready ({pointCount} points, {vCount} verts).");
     }
@@ -444,7 +467,7 @@ public class UmapPointCloud : MonoBehaviour
                 Debug.Log($"[UmapPointCloud] SELECTED {selectedIndex}: {sequenceIds[selectedIndex]}");
 
                 if (infoPanel != null)
-                    infoPanel.Show(cameraTransform, sequenceIds[selectedIndex], rawPositions[selectedIndex]);
+                    infoPanel.Show(cameraTransform, sequenceIds[selectedIndex], rawPositions[selectedIndex], selectedIndex);
                 else
                     ShowInfoLabel(selectedIndex, "SELECTED\n");
 
@@ -671,7 +694,9 @@ public class UmapPointCloud : MonoBehaviour
             localSize = basePointSize * 2.8f * pulse;
             col = Color.Lerp(col, Color.white, 0.45f);
         }
-        highlightMarker.localScale = Vector3.one * localSize;
+        // Divide by cloud scale so the sphere stays constant world size
+        float cloudScale = transform.localScale.x > 1e-5f ? transform.localScale.x : 1f;
+        highlightMarker.localScale = Vector3.one * localSize / cloudScale;
         highlightMat.color = col;
     }
 
@@ -743,6 +768,104 @@ static Color Viridis(float t)
         if (t < 0.50f) return Color.Lerp(c1, c2, (t - 0.25f) / 0.25f);
         if (t < 0.75f) return Color.Lerp(c2, c3, (t - 0.50f) / 0.25f);
         return                Color.Lerp(c3, c4, (t - 0.75f) / 0.25f);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    //  Panel pinning
+    // ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Wire up the active (unpinned) info panel: assign a pin color, hook onHide to reset
+    /// selection state, and hook onPin to handle the panel being pinned.
+    /// </summary>
+    void WireActivePanel(PointInfoPanel p)
+    {
+        p.PinColor = PinColors[_nextPinColorIdx % PinColors.Length];
+        _nextPinColorIdx++;
+        // Use assignment (not +=) so we always replace any leftover handlers from before
+        p.onHide = () => { selectedIndex = -1; infoLabel?.gameObject.SetActive(false); };
+        p.onPin  = (pointIdx, color) => OnPanelPinned(p, pointIdx, color);
+    }
+
+    /// <summary>
+    /// Called when the user pins an info panel. Records it as pinned, colors the cloud point,
+    /// replaces its onHide with the pinned-panel cleanup handler, and creates a fresh active panel.
+    /// </summary>
+    void OnPanelPinned(PointInfoPanel panel, int pointIdx, Color color)
+    {
+        _pinnedPanels.Add(panel);
+
+        // Color the cloud point and add a slightly-larger sphere marker to match the pin
+        if (pointIdx >= 0)
+        {
+            SetPointColor(pointIdx, color);
+            CreatePinnedMarker(pointIdx, color);
+        }
+
+        // Replace the active-panel onHide with pinned-panel cleanup
+        panel.onHide = () =>
+        {
+            if (pointIdx >= 0) RestorePointColor(pointIdx);
+            _pinnedPanels.Remove(panel);
+        };
+        panel.onPin = null;  // prevent double-pinning
+
+        // Create a new active panel for the next selection
+        CreateNewActivePanel();
+    }
+
+    void CreateNewActivePanel()
+    {
+        var go = new GameObject("InfoPanel");
+        infoPanel = go.AddComponent<PointInfoPanel>();
+        WireActivePanel(infoPanel);
+    }
+
+    void SetPointColor(int index, Color color)
+    {
+        if (_meshColors == null || cloudMesh == null) return;
+        if (index < 0 || index >= pointCount) return;
+        Color32 c32 = color;
+        for (int k = 0; k < 4; k++)
+            _meshColors[index * 4 + k] = c32;
+        cloudMesh.colors32 = _meshColors;
+    }
+
+    void RestorePointColor(int index)
+    {
+        if (pointColors == null || index < 0 || index >= pointCount) return;
+        SetPointColor(index, pointColors[index]);
+        DestroyPinnedMarker(index);
+    }
+
+    void CreatePinnedMarker(int index, Color color)
+    {
+        if (_pinnedMarkers.ContainsKey(index) || localPositions == null) return;
+
+        var go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        go.name = $"PinnedMarker_{index}";
+        go.transform.SetParent(transform);
+        go.transform.localPosition = localPositions[index];
+        // 1.5× normal point size in world space — compensate for current cloud scale
+        float invScale = transform.localScale.x > 1e-5f ? 1f / transform.localScale.x : 1f;
+        go.transform.localScale = Vector3.one * basePointSize * 1.5f * invScale;
+        Destroy(go.GetComponent<SphereCollider>());
+
+        var mr = go.GetComponent<MeshRenderer>();
+        mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        mr.receiveShadows    = false;
+        mr.material = new Material(Shader.Find("Unlit/Color")) { color = color };
+
+        _pinnedMarkers[index] = go;
+    }
+
+    void DestroyPinnedMarker(int index)
+    {
+        if (_pinnedMarkers.TryGetValue(index, out var go))
+        {
+            Destroy(go);
+            _pinnedMarkers.Remove(index);
+        }
     }
 
     // ─────────────────────────────────────────────────────────────

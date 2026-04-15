@@ -154,7 +154,9 @@ public class ProteinVisualizer : MonoBehaviour
         Vector3 lTip = GetFingertipPosition(_leftSkel,  _leftHandAnchor);
 
         // ── Two-hand scale (takes priority over single-hand grab) ────────
-        if (rP && lP)
+        // Only enter/continue two-hand mode if this protein was already held with one hand.
+        // This prevents all released proteins from scaling together when any two hands pinch.
+        if (rP && lP && (_isGrabbed || _isTwoHandScaling))
         {
             if (!_isTwoHandScaling)
             {
