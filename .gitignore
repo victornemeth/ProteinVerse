@@ -33,3 +33,17 @@ crashlytics-build.properties
 # OS
 .DS_Store
 Thumbs.db
+
+# Unity crash recovery scenes
+Assets/_Recovery/
+
+# Build artifacts (Unity-generated, not for source control)
+XRexplorer_BurstDebugInformation_DoNotShip/
+build_BackUpThisFolder_ButDontShipItWithYourGame/
+
+# Temp / tooling
+.utmp/
+.claude/
+
+# Scratch / test files
+test_size.cs

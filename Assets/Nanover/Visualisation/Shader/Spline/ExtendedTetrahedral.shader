@@ -14,9 +14,9 @@ Shader "Nanover/Spline/ExtendedTetrahedral"
     SubShader
     {
         Tags { 
+            "RenderPipeline" = "UniversalRenderPipeline"
             "Queue" = "Transparent" 
             "RenderType" = "Transparent" 
-            "LightMode"="ForwardBase"
         }
 
 
@@ -25,6 +25,7 @@ Shader "Nanover/Spline/ExtendedTetrahedral"
 
         CGINCLUDE
 
+        #pragma target 4.5
         #include "UnityCG.cginc"
         #pragma multi_compile_instancing
         #pragma instancing_options procedural:procedural_setup
@@ -55,6 +56,7 @@ Shader "Nanover/Spline/ExtendedTetrahedral"
             float4 worldVertex : TEXCOORD1;
             float4 normal : TEXCOORD2;
             float bias : TEXCOORD3;
+            UNITY_VERTEX_OUTPUT_STEREO
         };
 
         // Normalize a vector, accounting for vectors near zero
@@ -69,6 +71,8 @@ Shader "Nanover/Spline/ExtendedTetrahedral"
         {
             v2f o;
             UNITY_SETUP_INSTANCE_ID(v);
+            UNITY_INITIALIZE_OUTPUT(v2f, o);
+            UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(o);
 
             // The spline segment being rendered
             ExtendedSplineSegment curve = instance_spline();
@@ -99,7 +103,8 @@ Shader "Nanover/Spline/ExtendedTetrahedral"
             referenceNormal = normalize(referenceNormal);
 
             // Factor to fix x flipping
-            float signX = sign(determinant(ObjectToWorld));
+            float det = determinant((float4x4)_NanoverObjectToWorld);
+            float signX = det < 0 ? -1 : 1;
             referenceBinormal *= signX;
 
             // The matrix representing this reference frame
@@ -147,12 +152,13 @@ Shader "Nanover/Spline/ExtendedTetrahedral"
 
             // Transform the vertex by both the reference frame and into world space
             v.vertex = mul(mat, float4(v.vertex.xyz, 1));
-            v.vertex = mul(ObjectToWorld, float4(v.vertex.xyz, 1));
+            v.vertex = mul(_NanoverObjectToWorld, float4(v.vertex.xyz, 1));
 
             o.normal = normalize(mul(mat_invt, float4(v.normal.xyz, 0)));
-            o.normal = normalize(mul(ObjectToWorldInverseTranspose, float4(o.normal.xyz, 0)));
+            o.normal = normalize(mul(_NanoverObjectToWorldInverseTranspose, float4(o.normal.xyz, 0)));
 
-            o.vertex = UnityObjectToClipPos(v.vertex);
+            // Multiply by UNITY_MATRIX_VP directly since v.vertex is in world space
+            o.vertex = mul(UNITY_MATRIX_VP, v.vertex);
             o.worldVertex = v.vertex;
 
             o.color = lerp(pow(curve.startColor, 2.2), pow(curve.endColor, 2.2), smoothstep(0, 1, bias));
@@ -165,7 +171,7 @@ Shader "Nanover/Spline/ExtendedTetrahedral"
         // Opaque pass
         Pass
         {
-
+            Tags { "LightMode" = "UniversalForward" }
             Blend One Zero
             ZWrite On
   
@@ -190,7 +196,7 @@ Shader "Nanover/Spline/ExtendedTetrahedral"
                 }
                 
                 float3 n = normalize(i.normal);
-                float3 l = normalize(_WorldSpaceLightPos0.xyz);
+                float3 l = normalize(float3(0.5, 1.0, 0.5)); // Fixed light dir for URP compatibility
 
                 color = DIFFUSE(color, n, l, _Diffuse);
 
@@ -203,7 +209,7 @@ Shader "Nanover/Spline/ExtendedTetrahedral"
         // Transparent pass
         Pass
         {
-
+            Tags { "LightMode" = "UniversalForwardOnly" }
             Blend SrcAlpha OneMinusSrcAlpha
             ZWrite On
 
@@ -227,7 +233,7 @@ Shader "Nanover/Spline/ExtendedTetrahedral"
                 }
 
                 float3 n = normalize(i.normal);
-                float3 l = normalize(_WorldSpaceLightPos0.xyz);
+                float3 l = normalize(float3(0.5, 1.0, 0.5)); // Fixed light dir for URP compatibility
 
                 color = DIFFUSE(color, n, l, _Diffuse);
 

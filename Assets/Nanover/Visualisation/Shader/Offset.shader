@@ -41,7 +41,7 @@ Shader "Nanover/Offset"
         {
             v2f o;
             
-            v.normal *= sign(mult * _Offset) * sign(determinant(unity_ObjectToWorld));
+            v.normal *= sign(mult * _Offset) * sign(determinant((float4x4)unity_ObjectToWorld));
             o.normal = mul(unity_ObjectToWorld, float4(v.normal.xyz, 0));
             
             v.vertex += v.normal * abs(_Offset);

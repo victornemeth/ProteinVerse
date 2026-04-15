@@ -97,7 +97,7 @@ Shader "Nanover/Spline/Tetrahedral"
                 referenceNormal = normalize(referenceNormal);
                 
                 // Factor to fix x flipping
-                float signX = sign(determinant(ObjectToWorld));
+                float signX = sign(determinant((float4x4)_NanoverObjectToWorld));
                 referenceBinormal *= signX;
                 
                 // The matrix representing this reference frame
@@ -143,10 +143,10 @@ Shader "Nanover/Spline/Tetrahedral"
                 
                 // Transform the vertex by both the reference frame and into world space
                 v.vertex = mul(mat, float4(v.vertex.xyz, 1));
-                v.vertex = mul(ObjectToWorld, float4(v.vertex.xyz, 1));
+                v.vertex = mul(_NanoverObjectToWorld, float4(v.vertex.xyz, 1));
                 
                 o.normal = normalize(mul(mat_invt, float4(v.normal.xyz, 0)));
-                o.normal = normalize(mul(ObjectToWorldInverseTranspose, float4(o.normal.xyz, 0)));
+                o.normal = normalize(mul(_NanoverObjectToWorldInverseTranspose, float4(o.normal.xyz, 0)));
                 
                 o.vertex = UnityObjectToClipPos(v.vertex);
                 o.worldVertex = v.vertex;

@@ -55,7 +55,7 @@ Shader "Nanover/Spline/Hermite"
             
             float scale = _Radius * lerp(curve.startScale.x, curve.endScale.x, t);
             
-            float signX = sign(determinant(ObjectToWorld));
+            float signX = sign(determinant((float4x4)_NanoverObjectToWorld));
             
             float4x4 mat = get_transformation_matrix(signX*scale*normalize(right.xyz), scale*tangent.xyz, scale*normalize(normal.xyz), pos.xyz);
             
@@ -92,8 +92,8 @@ Shader "Nanover/Spline/Hermite"
                 v.vertex = mul(mat, float4(v.vertex.xyz, 1));
                 o.normal = normalize(mul(mat, float4(v.normal.xyz, 0)));
                 
-                v.vertex = mul(ObjectToWorld, float4(v.vertex.xyz, 1));
-                o.normal = mul(ObjectToWorldInverseTranspose, float4(o.normal.xyz, 0));
+                v.vertex = mul(_NanoverObjectToWorld, float4(v.vertex.xyz, 1));
+                o.normal = mul(_NanoverObjectToWorldInverseTranspose, float4(o.normal.xyz, 0));
                 
                 float t = smoothstep(0, 1, bias);
             

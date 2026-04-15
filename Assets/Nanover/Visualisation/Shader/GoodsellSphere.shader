@@ -92,9 +92,9 @@ Shader "NanoverIMD/Goodsell Sphere"
                 #if !defined(PROCEDURAL_INSTANCING_ON)
                     float3 p = unity_ObjectToWorld._14_24_34;
                 #else
-                    float3 p = mul(ObjectToWorld, float4(instance_position(), 1)).xyz;
+                    float3 p = mul(_NanoverObjectToWorld, float4(instance_position(), 1)).xyz;
                 #endif
-                float s = length(ObjectToWorld._11_21_31) * 0.5 * instance_scale() * _Scale;
+                float s = length(_NanoverObjectToWorld._11_21_31) * 0.5 * instance_scale() * _Scale;
                 
                 o.q = float4(c - p, s);
                 o.d = float4(v - c, 0);

@@ -124,6 +124,10 @@ public class UmapPointCloud : MonoBehaviour
     private bool wasRightPinch;
     private bool wasLeftPinch;
 
+    // Cooldown to suppress rapid-fire re-selections from pinch jitter
+    private float _lastSelectTime = -10f;
+    private const float SelectCooldown = 0.5f;
+
     // ── Pinned panels ─────────────────────────────────────────────
     private readonly System.Collections.Generic.List<PointInfoPanel> _pinnedPanels =
         new System.Collections.Generic.List<PointInfoPanel>();
@@ -460,9 +464,10 @@ public class UmapPointCloud : MonoBehaviour
 
         if (anyInput)
         {
-            if (hoveredIndex >= 0)
+            if (hoveredIndex >= 0 && Time.time - _lastSelectTime >= SelectCooldown)
             {
                 // Point within proximity — select it
+                _lastSelectTime = Time.time;
                 selectedIndex = hoveredIndex;
                 Debug.Log($"[UmapPointCloud] SELECTED {selectedIndex}: {sequenceIds[selectedIndex]}");
 
@@ -475,14 +480,27 @@ public class UmapPointCloud : MonoBehaviour
             }
             else if (infoPanel != null && infoPanel.gameObject.activeSelf)
             {
-                // Don't dismiss if either hand is near the panel face (would be a grab, not a dismiss)
-                bool handNearPanel =
-                    (rightAnchor != null && infoPanel.IsHandNearForGrab(rightAnchor.position)) ||
-                    (leftAnchor  != null && infoPanel.IsHandNearForGrab(leftAnchor.position));
+                // Don't dismiss if either hand is near any panel face (active or pinned)
+                bool handNearPanel = false;
+                bool anyProteinReleased = false;
+
+                if (infoPanel != null)
+                {
+                    handNearPanel |= (rightAnchor != null && infoPanel.IsHandNearForGrab(rightAnchor.position)) ||
+                                     (leftAnchor  != null && infoPanel.IsHandNearForGrab(leftAnchor.position));
+                    anyProteinReleased |= infoPanel.IsProteinReleased;
+                }
+
+                foreach (var p in _pinnedPanels)
+                {
+                    handNearPanel |= (rightAnchor != null && p.IsHandNearForGrab(rightAnchor.position)) ||
+                                     (leftAnchor  != null && p.IsHandNearForGrab(leftAnchor.position));
+                    anyProteinReleased |= p.IsProteinReleased;
+                }
 
                 // Don't dismiss if the released protein is floating — the pinch is almost
                 // certainly a protein grab, not an intent to close the panel.
-                if (!handNearPanel && !infoPanel.IsProteinReleased)
+                if (!handNearPanel && !anyProteinReleased)
                     infoPanel.Hide();
             }
 

@@ -127,6 +127,8 @@ public class ProteinVisualizer : MonoBehaviour
 
     public void FetchAndRender(string url)
     {
+        // Cancel any in-progress fetch so stale coroutines don't overwrite the new protein
+        StopAllCoroutines();
         pdbUrl = url;
         StartCoroutine(FetchAndRenderPDB());
     }

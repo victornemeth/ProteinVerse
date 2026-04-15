@@ -55,7 +55,7 @@ v2f vert (appdata i)
     
     int N = max(1, instance_edge_count());
     
-    float overall_scale = length(ObjectToWorld._11_21_31);
+    float overall_scale = length(_NanoverObjectToWorld._11_21_31);
     
     float spacing = overall_scale * _Spacing * pow(_Shrink, N-1);
     
@@ -76,9 +76,9 @@ v2f vert (appdata i)
         
         o.a = 0.5 * (p2 - p1);
         
-        p = mul(ObjectToWorld, float4(p, 1)).xyz;
+        p = mul(_NanoverObjectToWorld, float4(p, 1)).xyz;
         
-        o.a = mul(ObjectToWorld, float4(o.a, 0)).xyz;
+        o.a = mul(_NanoverObjectToWorld, float4(o.a, 0)).xyz;
     #endif
     
     

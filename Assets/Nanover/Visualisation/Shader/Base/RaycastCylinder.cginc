@@ -85,7 +85,7 @@ v2f vert (appdata i)
 {
     v2f o;
     UNITY_SETUP_INSTANCE_ID(i);
-    float overall_scale = length(ObjectToWorld._11_21_31);
+    float overall_scale = length(_NanoverObjectToWorld._11_21_31);
     
     #if !defined(PROCEDURAL_INSTANCING_ON)
         
@@ -118,9 +118,9 @@ v2f vert (appdata i)
         
         o.a = 0.5 * (p2 - p1);
         
-        p = mul(ObjectToWorld, float4(p, 1)).xyz;
+        p = mul(_NanoverObjectToWorld, float4(p, 1)).xyz;
         
-        o.a = mul(ObjectToWorld, float4(o.a, 0)).xyz;
+        o.a = mul(_NanoverObjectToWorld, float4(o.a, 0)).xyz;
     #endif
     
     

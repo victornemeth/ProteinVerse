@@ -285,14 +285,18 @@ public class PointInfoPanel : MonoBehaviour
         StartCoroutine(FetchDomains(sequenceId));
         StartCoroutine(FetchProteins(sequenceId));
 
-        // If the previous protein was released (free-floating), destroy its GO and build a
-        // brand-new PdbContainer as a child of the structure tab — never reuse the old reference,
-        // because _structureContainer IS that destroyed GO and AddComponent on it would fire
-        // Start() a second time on a queued-for-destruction object.
-        if (_pdbRenderer != null && _pdbRenderer.IsReleased)
+        // Rebuild PdbContainer if: (a) _pdbRenderer was destroyed by Hide() when protein was
+        // released, OR (b) the protein is still in "released" (free-floating) state.
+        // Unity's == null check returns true for destroyed UnityEngine.Objects, so we must
+        // test _pdbRenderer == null first before accessing any property on it.
+        bool needRebuild = (_pdbRenderer == null);
+        if (!needRebuild && _pdbRenderer.IsReleased)
         {
             Destroy(_pdbRenderer.gameObject);   // destroy the floating protein
-
+            needRebuild = true;
+        }
+        if (needRebuild)
+        {
             _structureContainer = new GameObject("PdbContainer");
             _structureContainer.transform.SetParent(_structureTabRT, false);
             _structureContainer.transform.localPosition = new Vector3(0f, 0f, -40f);

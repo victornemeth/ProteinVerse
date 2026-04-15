@@ -95,13 +95,13 @@ Shader "NanoverIMD/Opaque/Hyperballs"
                 o.rayOrigin = v;
                 o.rayDirection = v - c;
                 
-                float3 p1 = mul(ObjectToWorld, float4(edge_position(0).xyz, 1));
-                float3 p2 = mul(ObjectToWorld, float4(edge_position(1).xyz, 1));
+                float3 p1 = mul(_NanoverObjectToWorld, float4(edge_position(0).xyz, 1));
+                float3 p2 = mul(_NanoverObjectToWorld, float4(edge_position(1).xyz, 1));
                 
                 o.bondStart = p1;
                 o.bondDir = normalize(p2 - p1);
                 
-                float global_scale = length(ObjectToWorld._11_21_31);
+                float global_scale = length(_NanoverObjectToWorld._11_21_31);
                 
                 float dist = length(p2 - p1);
               

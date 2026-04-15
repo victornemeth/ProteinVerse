@@ -4,12 +4,12 @@
 
     #define TRANSFORMATION_CGINC_INCLUDED
 
-    uniform float4x4 ObjectToWorld = float4x4(1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1);
-    uniform float4x4 WorldToObject = float4x4(1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1);
-    uniform float4x4 ObjectToWorldInverseTranspose = float4x4(1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1);
+    uniform float4x4 _NanoverObjectToWorld = float4x4(1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1);
+    uniform float4x4 _NanoverWorldToObject = float4x4(1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1);
+    uniform float4x4 _NanoverObjectToWorldInverseTranspose = float4x4(1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1);
 
     #if defined(UNITY_CG_INCLUDED)
-        #define InstanceSpaceViewDirection(v) mul(WorldToObject, float4(_WorldSpaceCameraPos.xyz, 1)).xyz - v
+        #define InstanceSpaceViewDirection(v) mul(_NanoverWorldToObject, float4(_WorldSpaceCameraPos.xyz, 1)).xyz - v
     #else
         #define InstanceSpaceViewDirection(v) float3(1, 0, 0)
     #endif
@@ -29,8 +29,8 @@
         unity_WorldToObject._31_32_33_34 = float4(ez, -dot(ez, p)) / s.z;
         unity_WorldToObject._41_42_43_44 = float4(0,0,0,1);
     
-        unity_ObjectToWorld = mul(ObjectToWorld, unity_ObjectToWorld);
-        unity_WorldToObject = mul(unity_WorldToObject, WorldToObject);
+        unity_ObjectToWorld = mul(_NanoverObjectToWorld, unity_ObjectToWorld);
+        unity_WorldToObject = mul(unity_WorldToObject, _NanoverWorldToObject);
     }
 
 
@@ -48,8 +48,8 @@
         unity_WorldToObject._13_23_33_43 = float4(0, 0, 1/scale, 0);
         unity_WorldToObject._14_24_34_44 = float4(-position.x/scale, -position.y/scale, -position.z/scale, 1);
 
-        unity_ObjectToWorld = mul(ObjectToWorld, unity_ObjectToWorld);
-        unity_WorldToObject = mul(unity_WorldToObject, WorldToObject);
+        unity_ObjectToWorld = mul(_NanoverObjectToWorld, unity_ObjectToWorld);
+        unity_WorldToObject = mul(unity_WorldToObject, _NanoverWorldToObject);
     }
     
     // https://stackoverflow.com/a/43454629
@@ -91,8 +91,8 @@
         unity_WorldToObject._41_42_43_44 = float4(0,0,0,1);
 
         // apply to existing
-    	unity_ObjectToWorld = mul(ObjectToWorld, unity_ObjectToWorld);
-    	unity_WorldToObject = mul(unity_WorldToObject, WorldToObject);
+    	unity_ObjectToWorld = mul(_NanoverObjectToWorld, unity_ObjectToWorld);
+    	unity_WorldToObject = mul(unity_WorldToObject, _NanoverWorldToObject);
     }
     
     void setup_billboard_edge_transformation_z(float3 startPosition, float3 endPosition, float2 scale) {
