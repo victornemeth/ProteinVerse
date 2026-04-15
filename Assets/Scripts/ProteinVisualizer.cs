@@ -40,6 +40,12 @@ public class ProteinVisualizer : MonoBehaviour
     private Vector3      _grabLocalOffset;
     private Quaternion   _grabRotOffset;
 
+    // Original transform snapshot — saved on Release(), restored on Recall()
+    private Transform    _originalParent;
+    private Vector3      _originalLocalPos;
+    private Quaternion   _originalLocalRot;
+    private Vector3      _originalLocalScale;
+
     // Two-hand scale state
     private bool         _isTwoHandScaling;
     private float        _scaleAtScaleStart;
@@ -233,6 +239,12 @@ public class ProteinVisualizer : MonoBehaviour
     /// </summary>
     public void Release(Vector3 worldPosition)
     {
+        // Snapshot the full local transform so Recall() can restore it exactly
+        _originalParent     = transform.parent;
+        _originalLocalPos   = transform.localPosition;
+        _originalLocalRot   = transform.localRotation;
+        _originalLocalScale = transform.localScale;
+
         transform.SetParent(null, worldPositionStays: true);
         transform.position   = worldPosition;
         transform.localScale *= 3f;   // larger target for grabbing
@@ -241,6 +253,25 @@ public class ProteinVisualizer : MonoBehaviour
         _isGrabbed           = false;
         _wasRPinch           = false;
         _wasLPinch           = false;
+    }
+
+    /// <summary>
+    /// Re-parents the protein into <paramref name="parent"/> (PdbContainer) and resets its
+    /// local transform to match the original in-panel state.
+    /// </summary>
+    public void Recall()
+    {
+        // Restore the exact parent and local transform that existed before Release()
+        transform.SetParent(_originalParent, worldPositionStays: false);
+        transform.localPosition = _originalLocalPos;
+        transform.localRotation = _originalLocalRot;
+        transform.localScale    = _originalLocalScale;
+        autoRotate              = true;
+        IsReleased              = false;
+        _isGrabbed              = false;
+        _isTwoHandScaling       = false;
+        _wasRPinch              = false;
+        _wasLPinch              = false;
     }
 
     // Returns the world-space index fingertip position.

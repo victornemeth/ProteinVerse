@@ -433,7 +433,7 @@ public class UmapPointCloud : MonoBehaviour
         bool rTriggerDown = OVRInput.GetDown(OVRInput.RawButton.RIndexTrigger);
 
         // ── Click detection ─────────────────────────────────────
-        bool anyInput = (!isMovementEnabled) && (rTriggerDown || rPinchDown);
+        bool anyInput = (!isMovementEnabled) && (rTriggerDown || rPinchDown || lPinchDown);
 
         if (anyInput)
         {
@@ -457,7 +457,9 @@ public class UmapPointCloud : MonoBehaviour
                     (rightAnchor != null && infoPanel.IsHandNearForGrab(rightAnchor.position)) ||
                     (leftAnchor  != null && infoPanel.IsHandNearForGrab(leftAnchor.position));
 
-                if (!handNearPanel)
+                // Don't dismiss if the released protein is floating — the pinch is almost
+                // certainly a protein grab, not an intent to close the panel.
+                if (!handNearPanel && !infoPanel.IsProteinReleased)
                     infoPanel.Hide();
             }
 
@@ -556,26 +558,31 @@ public class UmapPointCloud : MonoBehaviour
             return;
         }
 
-        // Convert index-fingertip world position to cloud local space
-        Vector3   tipWorld = GetSelectionHandPosition();
         Matrix4x4 w2l      = transform.worldToLocalMatrix;
-        Vector3   tipLocal = w2l.MultiplyPoint3x4(tipWorld);
+        float     worldScale = transform.lossyScale.x;
+        float     localR     = worldScale > 1e-4f ? proximityRadius / worldScale : proximityRadius;
+        float     threshSq   = localR * localR;
 
-        // Scale world-space proximity radius into cloud local space (uniform scale assumed)
-        float worldScale = transform.lossyScale.x;
-        float localR     = worldScale > 1e-4f ? proximityRadius / worldScale : proximityRadius;
-
-        var job = new FindNearestProximityJob
+        // Try right hand first; fall back to left hand if nothing found in range
+        Vector3 rTipLocal = w2l.MultiplyPoint3x4(GetHandTipPosition(rightSkel, rightAnchor));
+        new FindNearestProximityJob
         {
-            positions   = nativePositions,
-            tipLocal    = tipLocal,
-            threshSq    = localR * localR,
-            pointCount  = pointCount,
-            resultIndex = nativeResultIndex,
-        };
-        job.Schedule().Complete();
+            positions = nativePositions, tipLocal = rTipLocal,
+            threshSq  = threshSq, pointCount = pointCount, resultIndex = nativeResultIndex,
+        }.Schedule().Complete();
 
         int nearest = nativeResultIndex[0];
+
+        if (nearest < 0)
+        {
+            Vector3 lTipLocal = w2l.MultiplyPoint3x4(GetHandTipPosition(leftSkel, leftAnchor));
+            new FindNearestProximityJob
+            {
+                positions = nativePositions, tipLocal = lTipLocal,
+                threshSq  = threshSq, pointCount = pointCount, resultIndex = nativeResultIndex,
+            }.Schedule().Complete();
+            nearest = nativeResultIndex[0];
+        }
         if (nearest == hoveredIndex) return;
         hoveredIndex = nearest;
 
@@ -594,21 +601,21 @@ public class UmapPointCloud : MonoBehaviour
         }
     }
 
-    // Returns the world-space position of the right index fingertip.
+    // Returns the world-space index fingertip position for the given hand.
     //
-    // Quest 3 uses the XRHand bone system (SkeletonType.XRHandRight), NOT the old Hand_* system.
+    // Quest 3 uses the XRHand bone system (SkeletonType.XRHandRight/Left), NOT the old Hand_* system.
     // The two systems share numeric values that COLLIDE:
     //   Hand_IndexTip  = 20  ==  XRHand_RingTip  (ring finger tip!)
     //   Hand_Index3    =  8  ==  XRHand_IndexIntermediate
     //   XRHand_IndexTip    = 10  (correct for XR)
     //   XRHand_IndexDistal =  9  (distal joint, ~1 cm from tip)
     // We therefore check the skeleton type at runtime and pick the right constant.
-    Vector3 GetSelectionHandPosition()
+    Vector3 GetHandTipPosition(OVRSkeleton skel, Transform anchor)
     {
-        if (rightSkel != null && rightSkel.IsInitialized)
+        if (skel != null && skel.IsInitialized)
         {
-            bool isXR = rightSkel.GetSkeletonType() == OVRSkeleton.SkeletonType.XRHandRight
-                     || rightSkel.GetSkeletonType() == OVRSkeleton.SkeletonType.XRHandLeft;
+            bool isXR = skel.GetSkeletonType() == OVRSkeleton.SkeletonType.XRHandRight
+                     || skel.GetSkeletonType() == OVRSkeleton.SkeletonType.XRHandLeft;
 
             OVRSkeleton.BoneId tipId    = isXR ? OVRSkeleton.BoneId.XRHand_IndexTip
                                                : OVRSkeleton.BoneId.Hand_IndexTip;
@@ -617,14 +624,14 @@ public class UmapPointCloud : MonoBehaviour
 
             Vector3 distalPos   = Vector3.zero;
             bool    foundDistal = false;
-            foreach (var b in rightSkel.Bones)
+            foreach (var b in skel.Bones)
             {
                 if (b.Id == tipId)    return b.Transform.position;
                 if (b.Id == distalId) { distalPos = b.Transform.position; foundDistal = true; }
             }
             if (foundDistal) return distalPos;
         }
-        return rightAnchor != null ? rightAnchor.position : Vector3.zero;
+        return anchor != null ? anchor.position : Vector3.zero;
     }
 
     // ─────────────────────────────────────────────────────────────

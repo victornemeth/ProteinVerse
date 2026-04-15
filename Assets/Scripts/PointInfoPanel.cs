@@ -130,8 +130,6 @@ public class PointInfoPanel : MonoBehaviour
         HandleGrab();
         CheckButtonPoke();
         HandleControllerScroll();
-
-        // Rotation is handled by ProteinVisualizer itself (rotationSpeed, autoRotate)
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -147,6 +145,9 @@ public class PointInfoPanel : MonoBehaviour
     /// Uses a plane-projection test so it works correctly for any part of the panel,
     /// not just the centre.
     /// </summary>
+    /// <summary>True while the released protein is floating in the scene.</summary>
+    public bool IsProteinReleased => _pdbRenderer != null && _pdbRenderer.IsReleased;
+
     public bool IsHandNearForGrab(Vector3 worldPos)
     {
         // Transform to canvas-local space.  Canvas scale is 0.001, so
@@ -272,10 +273,9 @@ public class PointInfoPanel : MonoBehaviour
             _pdbRenderer = _structureContainer.AddComponent<ProteinVisualizer>();
         }
 
-        // Reset release button
+        // Reset release/recall button
         if (_releaseProteinBtnText != null) _releaseProteinBtnText.text = "RELEASE PROTEIN";
         if (_releaseProteinBtnImg  != null) _releaseProteinBtnImg.color = new Color(0.10f, 0.35f, 0.70f, 0.97f);
-        if (_releaseProteinBtn     != null) _releaseProteinBtn.interactable = true;
 
         // Activate the structure tab first so PdbContainer is active before starting the coroutine
         SetTab(0);
@@ -295,22 +295,31 @@ public class PointInfoPanel : MonoBehaviour
         onHide?.Invoke();
     }
 
-    void OnReleaseProteinClicked()
+    void OnReleaseRecallBtnClicked()
     {
-        if (_pdbRenderer == null || _pdbRenderer.IsReleased) return;
+        if (_pdbRenderer == null) return;
 
-        // Position: 55 cm in front of the user at chest level
-        Camera cam = Camera.main;
-        Vector3 releasePos = cam != null
-            ? cam.transform.position + cam.transform.forward * 0.55f + Vector3.down * 0.25f
-            : transform.position + Vector3.forward * 0.3f;
+        if (!_pdbRenderer.IsReleased)
+        {
+            // Release: detach and float in front of user
+            Camera cam = Camera.main;
+            Vector3 releasePos = cam != null
+                ? cam.transform.position + cam.transform.forward * 0.55f + Vector3.down * 0.25f
+                : transform.position + Vector3.forward * 0.3f;
 
-        _pdbRenderer.Release(releasePos);
+            _pdbRenderer.Release(releasePos);
 
-        // Update button to reflect the released state
-        if (_releaseProteinBtnText != null) _releaseProteinBtnText.text = "PROTEIN RELEASED";
-        if (_releaseProteinBtnImg  != null) _releaseProteinBtnImg.color = new Color(0.25f, 0.25f, 0.25f, 0.80f);
-        if (_releaseProteinBtn     != null) _releaseProteinBtn.interactable = false;
+            if (_releaseProteinBtnText != null) _releaseProteinBtnText.text = "RECALL PROTEIN";
+            if (_releaseProteinBtnImg  != null) _releaseProteinBtnImg.color = new Color(0.65f, 0.35f, 0.05f, 0.97f);
+        }
+        else
+        {
+            // Recall: snap protein back into the panel
+            _pdbRenderer.Recall();
+
+            if (_releaseProteinBtnText != null) _releaseProteinBtnText.text = "RELEASE PROTEIN";
+            if (_releaseProteinBtnImg  != null) _releaseProteinBtnImg.color = new Color(0.10f, 0.35f, 0.70f, 0.97f);
+        }
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -767,7 +776,7 @@ public class PointInfoPanel : MonoBehaviour
 
         _pdbRenderer = _structureContainer.AddComponent<ProteinVisualizer>();
 
-        // ── "Release Protein" button — pinned to bottom of structure tab ──
+        // ── "Release / Recall Protein" button — pinned to bottom of structure tab ──
         var relBtnRT = new GameObject("ReleaseProteinBtn").AddComponent<RectTransform>();
         relBtnRT.SetParent(stRT, false);
         relBtnRT.anchorMin        = new Vector2(0.1f, 0f);
@@ -785,7 +794,7 @@ public class PointInfoPanel : MonoBehaviour
         rc.highlightedColor = new Color(0.20f, 0.50f, 0.90f, 1f);
         rc.pressedColor     = new Color(0.06f, 0.22f, 0.50f, 1f);
         _releaseProteinBtn.colors = rc;
-        _releaseProteinBtn.onClick.AddListener(OnReleaseProteinClicked);
+        _releaseProteinBtn.onClick.AddListener(OnReleaseRecallBtnClicked);
 
         _releaseProteinBtnText = Label(relBtnRT, font, "RELEASE PROTEIN", 11f,
             Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
