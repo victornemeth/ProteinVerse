@@ -78,6 +78,7 @@ public class UmapPointCloud : MonoBehaviour
     private Color32[]    _metadataColors;   // per-point colors loaded from local binary (detection method)
     private bool         _isMetadataColorMode = false;
     public  bool         IsMetadataColorMode => _isMetadataColorMode;
+    private GameObject   _legendPanelGO;    // spawned when metadata color mode is active
 
     private static readonly int ShaderPointSize = Shader.PropertyToID("_PointSize");
     private static readonly int ShaderMoveTint  = Shader.PropertyToID("_MoveTint");
@@ -261,6 +262,7 @@ public class UmapPointCloud : MonoBehaviour
         if (cloudMesh != null)     Destroy(cloudMesh);
         if (cloudMaterial != null) Destroy(cloudMaterial);
         foreach (var go in _pinnedMarkers.Values) if (go != null) Destroy(go);
+        DestroyLegendPanel();
         _pinnedMarkers.Clear();
     }
 
@@ -418,6 +420,141 @@ public class UmapPointCloud : MonoBehaviour
         }
 
         cloudMesh.colors32 = _meshColors;
+
+        // Spawn or destroy the floating legend panel
+        if (_isMetadataColorMode)
+            SpawnLegendPanel();
+        else
+            DestroyLegendPanel();
+    }
+
+    void DestroyLegendPanel()
+    {
+        if (_legendPanelGO != null)
+        {
+            Destroy(_legendPanelGO);
+            _legendPanelGO = null;
+        }
+    }
+
+    void SpawnLegendPanel()
+    {
+        DestroyLegendPanel();
+
+        // ── Legend data (matches color_detection_method_RBPdetect2_legend.json) ─
+        string title = "Evidence: RBPdetect2";
+        var items = new (string name, Color color)[]
+        {
+            ("TSP",         new Color(52/255f,  152/255f, 219/255f)),
+            ("TF",          new Color(231/255f,  76/255f,  60/255f)),
+            ("No Evidence", new Color(189/255f, 195/255f, 199/255f)),
+        };
+
+        // ── Position: in front of the camera, slightly to the right and at eye level ─
+        Transform cam = cameraTransform != null ? cameraTransform : Camera.main?.transform;
+        Vector3 forward = cam != null ? cam.forward : Vector3.forward;
+        Vector3 right   = cam != null ? cam.right   : Vector3.right;
+        forward.y = 0f; forward.Normalize();  // keep panel vertical
+        Vector3 spawnPos = (cam != null ? cam.position : Vector3.zero)
+                         + forward * 0.55f
+                         + right   * 0.22f
+                         + Vector3.down * 0.05f;
+
+        // ── Build canvas ─────────────────────────────────────────
+        const float W = 160f;
+        float H = 36f + 36f * items.Length + 8f;  // header + rows + bottom padding
+        const float Scale = 0.001f;
+
+        _legendPanelGO = new GameObject("LegendPanel");
+        _legendPanelGO.transform.position = spawnPos;
+        _legendPanelGO.transform.rotation = Quaternion.LookRotation(forward);
+
+        var canvas = _legendPanelGO.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.WorldSpace;
+        _legendPanelGO.AddComponent<UnityEngine.UI.GraphicRaycaster>();
+
+        var panelRT = _legendPanelGO.GetComponent<RectTransform>();
+        panelRT.sizeDelta  = new Vector2(W, H);
+        panelRT.localScale = Vector3.one * Scale;
+
+        var font = TMPro.TMP_Settings.defaultFontAsset;
+
+        // Background
+        LegendMakeImage(_legendPanelGO.transform, Vector2.zero, Vector2.one,
+                        new Color(0.05f, 0.07f, 0.15f, 0.97f));
+
+        // Header
+        var hdrGO = new GameObject("Header");
+        hdrGO.transform.SetParent(_legendPanelGO.transform, false);
+        var hdrRT = hdrGO.AddComponent<RectTransform>();
+        hdrRT.anchorMin = new Vector2(0f, 1f); hdrRT.anchorMax = Vector2.one;
+        hdrRT.pivot     = new Vector2(0.5f, 1f);
+        hdrRT.sizeDelta = new Vector2(0f, 36f);
+        hdrRT.anchoredPosition = Vector2.zero;
+        LegendMakeImage(hdrGO.transform, Vector2.zero, Vector2.one, new Color(0.12f, 0.14f, 0.36f, 1f));
+        LegendMakeLabel(hdrGO.transform, font, title, 11f, new Color(0.85f, 0.92f, 1f), TMPro.FontStyles.Bold);
+
+        // Colour swatch rows
+        float y = -36f;
+        foreach (var (name, col) in items)
+        {
+            var rowGO = new GameObject($"Row_{name}");
+            rowGO.transform.SetParent(_legendPanelGO.transform, false);
+            var rowRT = rowGO.AddComponent<RectTransform>();
+            rowRT.anchorMin        = new Vector2(0f, 1f); rowRT.anchorMax = new Vector2(1f, 1f);
+            rowRT.pivot            = new Vector2(0.5f, 1f);
+            rowRT.sizeDelta        = new Vector2(0f, 36f);
+            rowRT.anchoredPosition = new Vector2(0f, y);
+
+            // Colour swatch (left quarter)
+            var swatchGO = new GameObject("Swatch");
+            swatchGO.transform.SetParent(rowGO.transform, false);
+            var swatchRT = swatchGO.AddComponent<RectTransform>();
+            swatchRT.anchorMin = new Vector2(0f,   0.15f); swatchRT.anchorMax = new Vector2(0.22f, 0.85f);
+            swatchRT.offsetMin = new Vector2(10f,  0f);    swatchRT.offsetMax = new Vector2(-4f,   0f);
+            swatchGO.AddComponent<UnityEngine.UI.Image>().color = col;
+
+            // Label
+            var lblGO = new GameObject("Label");
+            lblGO.transform.SetParent(rowGO.transform, false);
+            var lblRT = lblGO.AddComponent<RectTransform>();
+            lblRT.anchorMin = new Vector2(0.22f, 0f); lblRT.anchorMax = Vector2.one;
+            lblRT.offsetMin = new Vector2(8f, 0f);    lblRT.offsetMax = new Vector2(-6f, 0f);
+            var tmp = lblGO.AddComponent<TMPro.TextMeshProUGUI>();
+            tmp.font = font; tmp.text = name; tmp.fontSize = 11f;
+            tmp.color = Color.white; tmp.fontStyle = TMPro.FontStyles.Normal;
+            tmp.alignment = TMPro.TextAlignmentOptions.MidlineLeft;
+            tmp.raycastTarget = false;
+
+            y -= 36f;
+        }
+    }
+
+    static void LegendMakeImage(Transform parent, Vector2 anchorMin, Vector2 anchorMax, Color col)
+    {
+        var go = new GameObject("Img");
+        go.transform.SetParent(parent, false);
+        var rt = go.AddComponent<RectTransform>();
+        rt.anchorMin = anchorMin; rt.anchorMax = anchorMax;
+        rt.offsetMin = rt.offsetMax = Vector2.zero;
+        var img = go.AddComponent<UnityEngine.UI.Image>();
+        img.color = col;
+        img.raycastTarget = false;
+    }
+
+    static void LegendMakeLabel(Transform parent, TMPro.TMP_FontAsset font, string text,
+                                float size, Color col, TMPro.FontStyles style)
+    {
+        var go = new GameObject("Lbl");
+        go.transform.SetParent(parent, false);
+        var rt = go.AddComponent<RectTransform>();
+        rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one;
+        rt.offsetMin = new Vector2(10f, 0f); rt.offsetMax = new Vector2(-10f, 0f);
+        var tmp = go.AddComponent<TMPro.TextMeshProUGUI>();
+        tmp.font = font; tmp.text = text; tmp.fontSize = size;
+        tmp.color = col; tmp.fontStyle = style;
+        tmp.alignment = TMPro.TextAlignmentOptions.Center;
+        tmp.raycastTarget = false;
     }
 
     // ─────────────────────────────────────────────────────────────
