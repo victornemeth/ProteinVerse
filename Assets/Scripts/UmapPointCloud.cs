@@ -386,6 +386,21 @@ public class UmapPointCloud : MonoBehaviour
         Debug.Log($"[UmapPointCloud] Loaded {filename}: {n} points.");
     }
 
+    public void SetColorMode(int mode)
+    {
+        if (mode < 0 || mode >= 4) return;
+        if (_meshColors == null || cloudMesh == null) return;
+        if (mode != 0)
+        {
+            Color32[] cand = GetActiveColorArrayFor(mode);
+            if (cand == null || cand.Length != pointCount * 4)
+            { Debug.LogWarning($"[UmapPointCloud] Color mode {mode} not loaded yet."); return; }
+        }
+        _colorMode = mode;
+        ApplyCurrentColorMode();
+        if (_colorMode != 0) SpawnLegendPanel(); else DestroyLegendPanel();
+    }
+
     public void CycleColorMode()
     {
         if (_meshColors == null || cloudMesh == null) return;

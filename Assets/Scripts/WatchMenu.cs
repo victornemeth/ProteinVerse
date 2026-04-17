@@ -1,4 +1,3 @@
-using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
@@ -14,58 +13,63 @@ public class WatchMenu : MonoBehaviour
 
     [Header("Menu Content")]
     public bool showMoveButton  = true;
-    public bool showColorButton = true;
+    public bool showColorButton = false;
     public string menuTitle = "PALM MENU";
 
     [Header("Menu Appearance")]
     public float panelWidth = 140f;
-    [Tooltip("Leave at 0 to auto-size based on which buttons are shown")]
+    [Tooltip("Leave at 0 to auto-size")]
     public float panelHeightOverride = 0f;
-    [Tooltip("Overall scale of the menu in the world.")]
+    [Tooltip("World-space scale of the canvas")]
     public float globalScale = 0.0008f;
-    [Tooltip("Offset relative to the wrist bone (moves menu to the palm center)")]
+    [Tooltip("Offset relative to the wrist bone")]
     public Vector3 menuOffset = new Vector3(0.02f, -0.02f, 0.06f);
     [Tooltip("Rotation offset relative to the wrist bone")]
     public Vector3 menuRotationOffset = new Vector3(180f, 0f, 0f);
     public float transitionSpeed = 10f;
 
     [Header("Detection Thresholds")]
-    [Tooltip("How directly the palm needs to face the camera to appear (0 to 1)")]
+    [Tooltip("Palm-to-camera dot product threshold for showing the menu")]
     public float facingThreshold = 0.6f;
 
     // ── Internal State ────────────────────────────────────────────────
-    private OVRCameraRig _rig;
-    private OVRSkeleton  _skeleton;
-    private OVRHand      _hand;
+    private OVRCameraRig  _rig;
+    private OVRSkeleton   _skeleton;
+    private OVRHand       _hand;
 
-    private CanvasGroup  _canvasGroup;
+    private CanvasGroup   _canvasGroup;
     private RectTransform _panelRT;
-
-    private bool  _isLookingAtWatch = false;
-    private float _currentAlpha = 0f;
+    private float         _currentAlpha = 0f;
 
     private UmapPointCloud  _pointCloud;
+
+    // Move button
     private TextMeshProUGUI _toggleMoveText;
     private Image           _toggleMoveBtnImg;
-    private TextMeshProUGUI _colorModeText;
-    private Image           _colorModeBtnImg;
 
-    // Button colors
+    // Color mode buttons (one per mode: 0=viridis, 1=RBP, 2=fiber/spike, 3=spike detail)
+    private readonly Image[]           _colorBtnImages = new Image[4];
+    private readonly TextMeshProUGUI[] _colorBtnTexts  = new TextMeshProUGUI[4];
+
+    // ── Style constants ───────────────────────────────────────────────
     static readonly Color ColorSelectMode = new Color(0.08f, 0.10f, 0.25f, 0.97f);
     static readonly Color ColorMoveMode   = new Color(0.10f, 0.55f, 0.18f, 0.97f);
-    static readonly Color[] ColorModeColors = {
-        new Color(0.08f, 0.10f, 0.25f, 0.97f),  // 0: viridis / off
-        new Color(0.55f, 0.22f, 0.00f, 0.97f),  // 1: RBPdetect2 amber
-        new Color(0.13f, 0.40f, 0.67f, 0.97f),  // 2: fiber/spike blue
-        new Color(0.35f, 0.12f, 0.55f, 0.97f),  // 3: spike detail purple
+
+    // Active color per mode; inactive buttons are shown at 30% brightness
+    static readonly Color[] ModeColors = {
+        new Color(0.22f, 0.25f, 0.45f, 0.97f),  // 0: viridis/off  — muted navy
+        new Color(0.55f, 0.22f, 0.00f, 0.97f),  // 1: RBPdetect2   — amber
+        new Color(0.13f, 0.40f, 0.67f, 0.97f),  // 2: fiber/spike  — blue
+        new Color(0.35f, 0.12f, 0.55f, 0.97f),  // 3: spike detail — purple
     };
-    static readonly string[] ColorModeLabels = {
-        "COLORS\nOFF",
-        "RBPDETECT2\nON",
-        "FIBER/SPIKE\nON",
-        "SPIKE\nDETAIL\nON",
+    static readonly string[] ModeLabels = {
+        "VIRIDIS\n(OFF)",
+        "RBPDETECT2",
+        "FIBER / SPIKE",
+        "SPIKE DETAIL",
     };
 
+    // ── Lifecycle ─────────────────────────────────────────────────────
     void Start()
     {
         _rig = FindFirstObjectByType<OVRCameraRig>();
@@ -75,18 +79,17 @@ public class WatchMenu : MonoBehaviour
             _skeleton  = anchor.GetComponentInChildren<OVRSkeleton>();
             _hand      = anchor.GetComponentInChildren<OVRHand>();
         }
-
         _pointCloud = FindFirstObjectByType<UmapPointCloud>();
 
         BuildMenu();
-
-        _canvasGroup.alpha    = 0f;
-        _currentAlpha         = 0f;
-        _panelRT.localScale   = Vector3.zero;
+        _canvasGroup.alpha  = 0f;
+        _currentAlpha       = 0f;
+        _panelRT.localScale = Vector3.zero;
     }
 
     void Update()
     {
+        // Sync move button
         if (_pointCloud != null && _toggleMoveText != null)
         {
             bool moving = _pointCloud.isMovementEnabled;
@@ -99,65 +102,63 @@ public class WatchMenu : MonoBehaviour
             }
         }
 
-        if (_pointCloud != null && _colorModeText != null)
+        // Sync color mode buttons: active = full brightness, inactive = 30%
+        if (_pointCloud != null)
         {
-            int mode = _pointCloud.ColorModeIndex;
-            string t = ColorModeLabels[Mathf.Clamp(mode, 0, ColorModeLabels.Length - 1)];
-            if (_colorModeText.text != t) _colorModeText.text = t;
-            if (_colorModeBtnImg != null)
+            int active = _pointCloud.ColorModeIndex;
+            for (int i = 0; i < 4; i++)
             {
-                Color c = ColorModeColors[Mathf.Clamp(mode, 0, ColorModeColors.Length - 1)];
-                if (_colorModeBtnImg.color != c) _colorModeBtnImg.color = c;
+                if (_colorBtnImages[i] == null) continue;
+                Color full = ModeColors[i];
+                Color dim  = new Color(full.r * 0.3f, full.g * 0.3f, full.b * 0.3f, full.a);
+                Color want = (i == active) ? full : dim;
+                if (_colorBtnImages[i].color != want)
+                    _colorBtnImages[i].color = want;
             }
         }
 
+        // Hand tracking visibility
         if (_rig == null || _skeleton == null || !_skeleton.IsInitialized || _hand == null || !_hand.IsTracked)
         {
-            UpdateMenuVisibility(false, null, Vector3.zero);
+            UpdateVisibility(false, null, Vector3.zero);
             return;
         }
 
         var wristBone = GetBone(_skeleton, OVRSkeleton.BoneId.Hand_WristRoot);
         if (wristBone == null) return;
 
-        Vector3 anchorPosition = wristBone.Transform.position;
-        Vector3 palmNormal     = -wristBone.Transform.up;
-        Vector3 cameraPos      = _rig.centerEyeAnchor.position;
-        Vector3 palmToCamera   = (cameraPos - anchorPosition).normalized;
+        Vector3 anchor     = wristBone.Transform.position;
+        Vector3 palmNormal = -wristBone.Transform.up;
+        Vector3 toCamera   = (_rig.centerEyeAnchor.position - anchor).normalized;
+        bool looking       = Vector3.Dot(palmNormal, toCamera) > facingThreshold;
 
-        float dot = Vector3.Dot(palmNormal, palmToCamera);
-        _isLookingAtWatch = dot > facingThreshold;
-
-        UpdateMenuVisibility(_isLookingAtWatch, wristBone.Transform, anchorPosition);
+        UpdateVisibility(looking, wristBone.Transform, anchor);
     }
 
-    void UpdateMenuVisibility(bool visible, Transform wristTransform, Vector3 anchorPosition)
+    void UpdateVisibility(bool visible, Transform wrist, Vector3 anchor)
     {
-        float targetAlpha = visible ? 1f : 0f;
-        _currentAlpha = Mathf.MoveTowards(_currentAlpha, targetAlpha, Time.deltaTime * transitionSpeed);
-        _canvasGroup.alpha = _currentAlpha;
+        _currentAlpha = Mathf.MoveTowards(_currentAlpha, visible ? 1f : 0f, Time.deltaTime * transitionSpeed);
+        _canvasGroup.alpha  = _currentAlpha;
         _panelRT.localScale = Vector3.one * globalScale;
 
         bool show = _currentAlpha > 0.01f;
         if (_canvasGroup.gameObject.activeSelf != show)
             _canvasGroup.gameObject.SetActive(show);
 
-        if (show && wristTransform != null)
+        if (show && wrist != null)
         {
-            Vector3 pos = anchorPosition
-                        + wristTransform.right   * menuOffset.x
-                        + wristTransform.up      * menuOffset.y
-                        + wristTransform.forward * menuOffset.z;
-
-            _panelRT.position = pos;
-            _panelRT.rotation = wristTransform.rotation * Quaternion.Euler(menuRotationOffset);
+            _panelRT.position = anchor
+                              + wrist.right   * menuOffset.x
+                              + wrist.up      * menuOffset.y
+                              + wrist.forward * menuOffset.z;
+            _panelRT.rotation = wrist.rotation * Quaternion.Euler(menuRotationOffset);
         }
     }
 
-    private OVRBone GetBone(OVRSkeleton skel, OVRSkeleton.BoneId boneId)
+    private OVRBone GetBone(OVRSkeleton skel, OVRSkeleton.BoneId id)
     {
         foreach (var b in skel.Bones)
-            if (b.Id == boneId) return b;
+            if (b.Id == id) return b;
         return null;
     }
 
@@ -165,161 +166,176 @@ public class WatchMenu : MonoBehaviour
 
     void BuildMenu()
     {
-        int buttonCount = (showMoveButton ? 1 : 0) + (showColorButton ? 1 : 0);
-        float panelHeight = panelHeightOverride > 0f ? panelHeightOverride
-                          : buttonCount == 1 ? 130f : 220f;
+        // Auto panel height:
+        //   move-only  → 4× the base button height (520px) so it's large and easy to tap
+        //   color-only → header + 4 stacked buttons (30 + 4*80 = 350px)
+        //   both       → header + move + 4 color rows (not the primary use case)
+        float panelHeight;
+        if (panelHeightOverride > 0f)
+            panelHeight = panelHeightOverride;
+        else if (showMoveButton && !showColorButton)
+            panelHeight = 520f;
+        else if (showColorButton && !showMoveButton)
+            panelHeight = 30f + 4 * 80f;   // header + 4 rows
+        else
+            panelHeight = 30f + 100f + 4 * 60f;  // header + move + 4 color rows
 
-        // 1. Root Canvas
+        // Root canvas
         var canvasGo = new GameObject("WatchMenuCanvas");
         canvasGo.transform.SetParent(transform, false);
         canvasGo.layer = LayerMask.NameToLayer("UI");
 
-        _canvasGroup = canvasGo.AddComponent<CanvasGroup>();
-        _panelRT     = canvasGo.AddComponent<RectTransform>();
-        _panelRT.sizeDelta  = new Vector2(panelWidth, panelHeight);
+        _canvasGroup       = canvasGo.AddComponent<CanvasGroup>();
+        _panelRT           = canvasGo.AddComponent<RectTransform>();
+        _panelRT.sizeDelta = new Vector2(panelWidth, panelHeight);
         _panelRT.localScale = Vector3.one * globalScale;
 
         var canvas = canvasGo.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.WorldSpace;
         canvasGo.AddComponent<GraphicRaycaster>();
 
-        EnsureEventSystemHasPointableCanvasModule();
+        EnsureEventSystem();
         var pc = canvasGo.AddComponent<PointableCanvas>();
         pc.InjectAllPointableCanvas(canvas);
         AddPokeInteractable(pc, canvasGo, panelWidth, panelHeight);
 
         var font = TMP_Settings.defaultFontAsset;
 
-        // 2. Background
-        var bgGo = new GameObject("Background");
-        bgGo.transform.SetParent(_panelRT, false);
-        var bgRT = bgGo.AddComponent<RectTransform>();
-        bgRT.anchorMin = Vector2.zero; bgRT.anchorMax = Vector2.one;
-        bgRT.offsetMin = bgRT.offsetMax = Vector2.zero;
-        var bgImg = bgGo.AddComponent<Image>();
-        bgImg.color = new Color(0.05f, 0.07f, 0.15f, 0.97f);
-        bgImg.raycastTarget = false;
+        // Background
+        MakeImage(_panelRT, Vector2.zero, Vector2.one, new Color(0.05f, 0.07f, 0.15f, 0.97f));
+        // Border
+        MakeImage(_panelRT, Vector2.zero, Vector2.one, new Color(0.2f, 0.8f, 1f, 0.2f));
 
-        // 3. Border
-        var borderGo = new GameObject("Border");
-        borderGo.transform.SetParent(_panelRT, false);
-        var borderRT = borderGo.AddComponent<RectTransform>();
-        borderRT.anchorMin = Vector2.zero; borderRT.anchorMax = Vector2.one;
-        borderRT.offsetMin = borderRT.offsetMax = Vector2.zero;
-        var borderImg = borderGo.AddComponent<Image>();
-        borderImg.color = new Color(0.2f, 0.8f, 1f, 0.2f);
-        borderImg.raycastTarget = false;
+        // Header
+        var headerRT = PinTop(_panelRT, 30f);
+        MakeImage(headerRT, Vector2.zero, Vector2.one, new Color(0.12f, 0.14f, 0.36f, 1f));
+        MakeLabel(headerRT, font, menuTitle, 12f, new Color(0.85f, 0.92f, 1f), FontStyles.Bold, TextAlignmentOptions.Center);
 
-        // 4. Header
-        var headerRT = Pin("Header", bgRT, 0f, 30f);
-        var headerImg = headerRT.gameObject.AddComponent<Image>();
-        headerImg.color = new Color(0.12f, 0.14f, 0.36f, 1f);
-        headerImg.raycastTarget = false;
+        // Content area (below header)
+        var contentRT = new GameObject("Content").AddComponent<RectTransform>();
+        contentRT.SetParent(_panelRT, false);
+        contentRT.anchorMin = Vector2.zero;
+        contentRT.anchorMax = new Vector2(1f, 1f);
+        contentRT.offsetMin = new Vector2(0f, 0f);
+        contentRT.offsetMax = new Vector2(0f, -30f);  // leave header space
 
-        var titleRT = new GameObject("Title").AddComponent<RectTransform>();
-        titleRT.SetParent(headerRT, false);
-        titleRT.anchorMin = Vector2.zero; titleRT.anchorMax = Vector2.one;
-        titleRT.offsetMin = new Vector2(12f, 0f);
-        titleRT.offsetMax = new Vector2(-12f, 0f);
-        Label(titleRT, font, menuTitle, 12f, new Color(0.85f, 0.92f, 1f), FontStyles.Bold, TextAlignmentOptions.Center);
-
-        // 5. Buttons
-        if (buttonCount == 2)
+        if (showMoveButton && !showColorButton)
         {
-            // Both buttons: move on top half, color on bottom half
-            BuildMoveButton(bgRT, font, new Vector2(0f, 0.5f), Vector2.one,
-                            new Vector2(6f, 3f), new Vector2(-6f, -36f));
-            BuildColorButton(bgRT, font, Vector2.zero, new Vector2(1f, 0.5f),
-                             new Vector2(6f, 6f), new Vector2(-6f, -3f));
+            BuildMoveButton(contentRT, font);
         }
-        else if (showMoveButton)
+        else if (showColorButton && !showMoveButton)
         {
-            // Full height (below header)
-            BuildMoveButton(bgRT, font, Vector2.zero, Vector2.one,
-                            new Vector2(6f, 6f), new Vector2(-6f, -36f));
+            BuildColorButtons(contentRT, font);
         }
-        else if (showColorButton)
+        else if (showMoveButton && showColorButton)
         {
-            BuildColorButton(bgRT, font, Vector2.zero, Vector2.one,
-                             new Vector2(6f, 6f), new Vector2(-6f, -36f));
+            // Move button takes fixed 100px at top, color buttons fill the rest
+            var moveArea = new GameObject("MoveArea").AddComponent<RectTransform>();
+            moveArea.SetParent(contentRT, false);
+            moveArea.anchorMin = new Vector2(0f, 1f); moveArea.anchorMax = Vector2.one;
+            moveArea.pivot     = new Vector2(0.5f, 1f);
+            moveArea.sizeDelta = new Vector2(0f, 100f);
+            moveArea.anchoredPosition = Vector2.zero;
+            BuildMoveButton(moveArea, font);
+
+            var colorArea = new GameObject("ColorArea").AddComponent<RectTransform>();
+            colorArea.SetParent(contentRT, false);
+            colorArea.anchorMin = Vector2.zero; colorArea.anchorMax = new Vector2(1f, 1f);
+            colorArea.offsetMin = Vector2.zero; colorArea.offsetMax = new Vector2(0f, -100f);
+            BuildColorButtons(colorArea, font);
         }
     }
 
-    void BuildMoveButton(RectTransform parent, TMP_FontAsset font,
-                         Vector2 anchorMin, Vector2 anchorMax,
-                         Vector2 offsetMin, Vector2 offsetMax)
+    void BuildMoveButton(RectTransform parent, TMP_FontAsset font)
     {
         var btnRT = new GameObject("MoveModeBtn").AddComponent<RectTransform>();
         btnRT.SetParent(parent, false);
-        btnRT.anchorMin = anchorMin; btnRT.anchorMax = anchorMax;
-        btnRT.offsetMin = offsetMin; btnRT.offsetMax = offsetMax;
+        btnRT.anchorMin = Vector2.zero; btnRT.anchorMax = Vector2.one;
+        btnRT.offsetMin = new Vector2(6f, 6f);
+        btnRT.offsetMax = new Vector2(-6f, -6f);
 
         bool moving = _pointCloud != null && _pointCloud.isMovementEnabled;
         var btnImg = btnRT.gameObject.AddComponent<Image>();
-        btnImg.color = moving ? ColorMoveMode : ColorSelectMode;
+        btnImg.color        = moving ? ColorMoveMode : ColorSelectMode;
         btnImg.raycastTarget = true;
 
         var btn = btnRT.gameObject.AddComponent<Button>();
-        btn.targetGraphic = btnImg;
-        var c = btn.colors;
-        c.normalColor = Color.white; c.highlightedColor = new Color(1.18f,1.18f,1.18f,1f);
-        c.pressedColor = new Color(0.75f,0.75f,0.75f,1f); c.colorMultiplier = 1f;
-        btn.colors = c;
+        SetButtonColors(btn, btnImg);
+        btn.onClick.AddListener(() => {
+            if (_pointCloud != null)
+                _pointCloud.isMovementEnabled = !_pointCloud.isMovementEnabled;
+        });
 
-        _toggleMoveText    = Label(btnRT, font, moving ? "MOVE MODE\nON" : "SELECT MODE\nOFF",
-                                   18f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
-        _toggleMoveBtnImg  = btnImg;
-        btn.onClick.AddListener(OnToggleMoveModeClicked);
+        _toggleMoveText   = MakeLabel(btnRT, font, moving ? "MOVE MODE\nON" : "SELECT MODE\nOFF",
+                                      22f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
+        _toggleMoveBtnImg = btnImg;
     }
 
-    void BuildColorButton(RectTransform parent, TMP_FontAsset font,
-                          Vector2 anchorMin, Vector2 anchorMax,
-                          Vector2 offsetMin, Vector2 offsetMax)
+    void BuildColorButtons(RectTransform parent, TMP_FontAsset font)
     {
-        var btnRT = new GameObject("ColorModeBtn").AddComponent<RectTransform>();
-        btnRT.SetParent(parent, false);
-        btnRT.anchorMin = anchorMin; btnRT.anchorMax = anchorMax;
-        btnRT.offsetMin = offsetMin; btnRT.offsetMax = offsetMax;
+        int active = _pointCloud != null ? _pointCloud.ColorModeIndex : 0;
 
-        int mode = _pointCloud != null ? _pointCloud.ColorModeIndex : 0;
-        var btnImg = btnRT.gameObject.AddComponent<Image>();
-        btnImg.color = ColorModeColors[Mathf.Clamp(mode, 0, ColorModeColors.Length - 1)];
-        btnImg.raycastTarget = true;
-
-        var btn = btnRT.gameObject.AddComponent<Button>();
-        btn.targetGraphic = btnImg;
-        var c = btn.colors;
-        c.normalColor = Color.white; c.highlightedColor = new Color(1.18f,1.18f,1.18f,1f);
-        c.pressedColor = new Color(0.75f,0.75f,0.75f,1f); c.colorMultiplier = 1f;
-        btn.colors = c;
-
-        _colorModeText   = Label(btnRT, font, ColorModeLabels[Mathf.Clamp(mode, 0, ColorModeLabels.Length - 1)],
-                                 18f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
-        _colorModeBtnImg = btnImg;
-        btn.onClick.AddListener(OnToggleColorModeClicked);
-    }
-
-    void EnsureEventSystemHasPointableCanvasModule()
-    {
-        if (FindFirstObjectByType<PointableCanvasModule>() == null)
+        for (int i = 0; i < 4; i++)
         {
-            var es = FindFirstObjectByType<EventSystem>();
-            if (es != null) es.gameObject.AddComponent<PointableCanvasModule>();
-            else
-            {
-                var g = new GameObject("EventSystem");
-                g.AddComponent<EventSystem>();
-                g.AddComponent<PointableCanvasModule>();
-            }
+            int modeIdx = i;  // capture for lambda
+
+            // Each button is 1/4 of the parent height
+            float yMax = 1f - i       * 0.25f;
+            float yMin = 1f - (i + 1) * 0.25f;
+
+            var btnRT = new GameObject($"ColorBtn_{i}").AddComponent<RectTransform>();
+            btnRT.SetParent(parent, false);
+            btnRT.anchorMin = new Vector2(0f, yMin);
+            btnRT.anchorMax = new Vector2(1f, yMax);
+            btnRT.offsetMin = new Vector2(6f, 4f);
+            btnRT.offsetMax = new Vector2(-6f, -4f);
+
+            Color full = ModeColors[i];
+            Color dim  = new Color(full.r * 0.3f, full.g * 0.3f, full.b * 0.3f, full.a);
+
+            var btnImg = btnRT.gameObject.AddComponent<Image>();
+            btnImg.color        = (i == active) ? full : dim;
+            btnImg.raycastTarget = true;
+
+            var btn = btnRT.gameObject.AddComponent<Button>();
+            SetButtonColors(btn, btnImg);
+            btn.onClick.AddListener(() => OnColorBtnClicked(modeIdx));
+
+            _colorBtnImages[i] = btnImg;
+            _colorBtnTexts[i]  = MakeLabel(btnRT, font, ModeLabels[i],
+                                            16f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
+        }
+    }
+
+    void OnColorBtnClicked(int mode)
+    {
+        if (_pointCloud == null) return;
+        // Pressing the active mode toggles back to viridis (0), otherwise activates that mode
+        int newMode = (_pointCloud.ColorModeIndex == mode && mode != 0) ? 0 : mode;
+        _pointCloud.SetColorMode(newMode);
+    }
+
+    // ── Infrastructure ────────────────────────────────────────────────
+
+    void EnsureEventSystem()
+    {
+        if (FindFirstObjectByType<PointableCanvasModule>() != null) return;
+        var es = FindFirstObjectByType<EventSystem>();
+        if (es != null) es.gameObject.AddComponent<PointableCanvasModule>();
+        else
+        {
+            var g = new GameObject("EventSystem");
+            g.AddComponent<EventSystem>();
+            g.AddComponent<PointableCanvasModule>();
         }
     }
 
     void AddPokeInteractable(PointableCanvas pc, GameObject canvasGo, float w, float h)
     {
-        var pokeGO = new GameObject("PokeInteractable");
+        var pokeGO  = new GameObject("PokeInteractable");
         pokeGO.transform.SetParent(canvasGo.transform, false);
 
-        var surfGO = new GameObject("PokeSurface");
+        var surfGO  = new GameObject("PokeSurface");
         surfGO.transform.SetParent(pokeGO.transform, false);
         surfGO.transform.localScale = new Vector3(1f, 1f, 0.001f);
 
@@ -337,35 +353,45 @@ public class WatchMenu : MonoBehaviour
         poke.InjectOptionalPointableElement(pc);
     }
 
-    // ── Callbacks ────────────────────────────────────────────────────────
-
-    private void OnToggleMoveModeClicked()
+    static void SetButtonColors(Button btn, Image img)
     {
-        if (_pointCloud == null) return;
-        _pointCloud.isMovementEnabled = !_pointCloud.isMovementEnabled;
+        btn.targetGraphic = img;
+        var c = btn.colors;
+        c.normalColor      = Color.white;
+        c.highlightedColor = new Color(1.18f, 1.18f, 1.18f, 1f);
+        c.pressedColor     = new Color(0.75f, 0.75f, 0.75f, 1f);
+        c.colorMultiplier  = 1f;
+        btn.colors = c;
     }
 
-    private void OnToggleColorModeClicked()
-    {
-        if (_pointCloud == null) return;
-        _pointCloud.CycleColorMode();
-    }
+    // ── UI Helpers ────────────────────────────────────────────────────
 
-    // ── UI Layout Helpers ────────────────────────────────────────────────
-
-    RectTransform Pin(string name, RectTransform parent, float y, float height)
+    RectTransform PinTop(RectTransform parent, float height)
     {
-        var rt = new GameObject(name).AddComponent<RectTransform>();
+        var rt = new GameObject("HeaderRT").AddComponent<RectTransform>();
         rt.SetParent(parent, false);
-        rt.anchorMin = new Vector2(0f, 1f); rt.anchorMax = Vector2.one;
-        rt.pivot = new Vector2(0.5f, 1f);
-        rt.sizeDelta = new Vector2(0f, height);
-        rt.anchoredPosition = new Vector2(0f, y);
+        rt.anchorMin        = new Vector2(0f, 1f);
+        rt.anchorMax        = Vector2.one;
+        rt.pivot            = new Vector2(0.5f, 1f);
+        rt.sizeDelta        = new Vector2(0f, height);
+        rt.anchoredPosition = Vector2.zero;
         return rt;
     }
 
-    TextMeshProUGUI Label(RectTransform parent, TMP_FontAsset font, string text, float size,
-        Color color, FontStyles style, TextAlignmentOptions align)
+    static void MakeImage(RectTransform parent, Vector2 anchorMin, Vector2 anchorMax, Color col)
+    {
+        var go = new GameObject("Img");
+        go.transform.SetParent(parent, false);
+        var rt = go.AddComponent<RectTransform>();
+        rt.anchorMin = anchorMin; rt.anchorMax = anchorMax;
+        rt.offsetMin = rt.offsetMax = Vector2.zero;
+        var img = go.AddComponent<Image>();
+        img.color        = col;
+        img.raycastTarget = false;
+    }
+
+    static TextMeshProUGUI MakeLabel(RectTransform parent, TMP_FontAsset font, string text,
+        float size, Color color, FontStyles style, TextAlignmentOptions align)
     {
         var go = new GameObject("Lbl");
         go.transform.SetParent(parent, false);
