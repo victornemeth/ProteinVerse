@@ -1,7 +1,7 @@
 # ProteinVerse
 
 <p align="center">
-  <img src="Assets/icon.png" width="180" alt="ProteinVerse icon"/>
+  <img src="Assets/icon.png" width="250" alt="ProteinVerse icon"/>
 </p>
 
 A virtual reality application for exploring protein structural diversity in immersive 3D space. Built for **Meta Quest 3** using Unity.
