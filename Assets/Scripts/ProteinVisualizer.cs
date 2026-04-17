@@ -308,8 +308,6 @@ public class ProteinVisualizer : MonoBehaviour
     IEnumerator FetchAndRenderPDB()
     {
         string url = pdbUrl;
-        Debug.Log($"Fetching PDB from: {url}");
-        
         using (UnityWebRequest webRequest = UnityWebRequest.Get(url))
         {
             yield return webRequest.SendWebRequest();

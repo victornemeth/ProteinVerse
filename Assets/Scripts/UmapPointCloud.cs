@@ -351,7 +351,6 @@ public class UmapPointCloud : MonoBehaviour
         nativePositions = new NativeArray<Vector3>(localPositions, Allocator.Persistent);
         nativeResultIndex = new NativeArray<int>(1, Allocator.Persistent);
 
-        Debug.Log($"[UmapPointCloud] Parsed {pointCount} points.");
     }
 
     static bool ParseFloat(string s, out float v) =>
@@ -386,7 +385,6 @@ public class UmapPointCloud : MonoBehaviour
             for (int k = 0; k < 4; k++) colors[i*4+k] = c;
         }
         onLoaded(colors);
-        Debug.Log($"[UmapPointCloud] Loaded {filename}: {n} points.");
     }
 
     public void SetColorMode(int mode)
@@ -685,7 +683,6 @@ public class UmapPointCloud : MonoBehaviour
 
         cloudMaterial.SetFloat(ShaderPointSize, basePointSize);
 
-        Debug.Log($"[UmapPointCloud] Mesh ready ({pointCount} points, {vCount} verts).");
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -738,7 +735,6 @@ public class UmapPointCloud : MonoBehaviour
                 // Point within proximity — select it
                 _lastSelectTime = Time.time;
                 selectedIndex = hoveredIndex;
-                Debug.Log($"[UmapPointCloud] SELECTED {selectedIndex}: {sequenceIds[selectedIndex]}");
 
                 if (infoPanel != null)
                     infoPanel.Show(cameraTransform, sequenceIds[selectedIndex], rawPositions[selectedIndex], selectedIndex);
