@@ -68,7 +68,9 @@ If the Meta XR packages are not already present:
 
 ### 5. Point cloud data
 
-The UMAP coordinates are loaded from `umap_coordinates_n15.csv` at runtime. This file is included in the repository and must remain at the project root (or update the path in `UmapPointCloud.cs` if you move it).
+The app renders a spatially thinned subset of the full UMAP dataset for performance. At runtime it loads `umap_thinned.csv` from `StreamingAssets` — **6,001 points** out of the full 63,934, selected by voxel-grid subsampling (one representative point kept per cell of size ~0.186 UMAP units). This halves GPU vertex count while preserving the overall shape and cluster structure of the embedding.
+
+The full dataset is also included as `umap_coordinates_n15.csv` and is used only to regenerate the thinned file (see `thin_pointcloud.py`).
 
 The CSV format is:
 
@@ -78,7 +80,9 @@ UMAP1,UMAP2,UMAP3,Sequence_ID
 ...
 ```
 
-To use your own dataset, replace this file with one that follows the same format. The `Sequence_ID` column must match the identifiers your API serves.
+To adjust the thinning density, edit `TARGET` in `thin_pointcloud.py` and re-run it — it will regenerate `umap_thinned.csv` and all color binaries automatically.
+
+To use your own dataset, replace `umap_coordinates_n15.csv` with one that follows the same format and re-run `thin_pointcloud.py`. The `Sequence_ID` column must match the identifiers your API serves.
 
 ---
 
@@ -105,11 +109,19 @@ Assets/
     UmapPointCloud.cs      — loads CSV, builds point cloud mesh, handles hand interaction
     PointInfoPanel.cs      — info panel UI: fetches and displays protein data
     ProteinVisualizer.cs   — renders a PDB file as a cartoon protein in VR
+    WatchMenu.cs           — wrist palm menu (move mode + color mode toggles)
   Shaders/
     PointCloud.shader      — billboard point shader (constant world-space size)
   Nanover/
     Visualisation/Shader/  — Nanover-derived cartoon protein shaders (hyperballs, splines, etc.)
-umap_coordinates_n15.csv   — UMAP-reduced coordinates for ~63 900 PhaRBP sequences
+  StreamingAssets/
+    umap_thinned.csv                         — 6 001-point voxel-thinned subset (rendered at runtime)
+    umap_coordinates_n15.csv                 — full 63 934-point dataset (used to regenerate thinned)
+    color_detection_method_RBPdetect2.bin    — per-point RGB colors: RBPdetect2 evidence
+    color_domain_fiber_spike.bin             — per-point RGB colors: tail fiber vs tail spike
+    color_domain_spike_detail.bin            — per-point RGB colors: spike enzymatic subtypes
+thin_pointcloud.py         — re-thins the full CSV and regenerates all color binaries
+gen_color_bins.py          — (legacy) initial color binary download script
 ```
 
 ---
