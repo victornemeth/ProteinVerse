@@ -126,6 +126,7 @@ public class UmapPointCloud : MonoBehaviour
 
     private int  hoveredIndex  = -1;
     private int  selectedIndex = -1;
+    private int  _hoverTick    = 0;   // throttle hover job to every other frame
 
     // Previous-frame pinch state for edge detection
     private bool wasRightPinch;
@@ -156,6 +157,8 @@ public class UmapPointCloud : MonoBehaviour
 
     void Awake()
     {
+        QualitySettings.vSyncCount = 0;  // OVR manages frame pacing; vsync adds latency
+
         var rig = FindFirstObjectByType<OVRCameraRig>();
         if (rig != null)
         {
@@ -663,6 +666,7 @@ public class UmapPointCloud : MonoBehaviour
         _meshColors = cols;  // keep CPU copy so we can recolor individual points at runtime
 
         cloudMesh          = new Mesh { name = "PointCloudMesh" };
+        cloudMesh.MarkDynamic();   // streaming GPU buffer — cheaper repeated colors32 uploads
         cloudMesh.vertices = verts;
         cloudMesh.uv       = uvs;
         cloudMesh.colors32 = cols;
@@ -853,6 +857,10 @@ public class UmapPointCloud : MonoBehaviour
     void UpdateHover()
     {
         if (localPositions == null || !nativePositions.IsCreated) return;
+
+        // Run the proximity job every other frame — hover latency at 45 effective fps
+        // is imperceptible but halves job-scheduling overhead.
+        if (++_hoverTick % 2 != 0) return;
 
         if (isMovementEnabled)
         {

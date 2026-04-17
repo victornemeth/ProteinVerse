@@ -237,34 +237,35 @@ public class PointInfoPanel : MonoBehaviour
 
     void CheckButtonPoke()
     {
-        PokeCheck(_closeBtnRT,   ref _wasPokingClose,      Hide);
-        PokeCheck(_pinBtnRT,     ref _wasPokingPin,         OnPinBtnClicked);
-        PokeCheck(_releaseBtnRT, ref _wasPokingRelease,     OnReleaseRecallBtnClicked);
-        PokeCheck(_tabStructRT,  ref _wasPokingTabStruct,   () => SetTab(0));
-        PokeCheck(_tabInfoRT,    ref _wasPokingTabInfo,     () => SetTab(1));
+        // Fetch each tip once — avoids re-scanning all skeleton bones per button (10→2 scans/frame).
+        Vector3? rTip = GetIndexTipPos(_rightSkel);
+        Vector3? lTip = GetIndexTipPos(_leftSkel);
+
+        PokeCheck(_closeBtnRT,   ref _wasPokingClose,      Hide,                      rTip, lTip);
+        PokeCheck(_pinBtnRT,     ref _wasPokingPin,         OnPinBtnClicked,           rTip, lTip);
+        PokeCheck(_releaseBtnRT, ref _wasPokingRelease,     OnReleaseRecallBtnClicked, rTip, lTip);
+        PokeCheck(_tabStructRT,  ref _wasPokingTabStruct,   () => SetTab(0),           rTip, lTip);
+        PokeCheck(_tabInfoRT,    ref _wasPokingTabInfo,     () => SetTab(1),           rTip, lTip);
     }
 
-    /// <summary>
-    /// Fires <paramref name="onDown"/> once when either index fingertip enters the world-space
-    /// sphere centred on <paramref name="rt"/>'s rect centre with radius <see cref="PokeRadius"/>.
-    /// Uses rising-edge detection so holding the finger on the button doesn't repeat.
-    /// </summary>
-    void PokeCheck(RectTransform rt, ref bool was, System.Action onDown)
+    static Vector3? GetIndexTipPos(OVRSkeleton sk)
+    {
+        if (sk == null || !sk.IsInitialized) return null;
+        foreach (var b in sk.Bones)
+            if (b.Id == OVRSkeleton.BoneId.Hand_IndexTip)
+                return b.Transform.position;
+        return null;
+    }
+
+    void PokeCheck(RectTransform rt, ref bool was, System.Action onDown, Vector3? rTip, Vector3? lTip)
     {
         if (rt == null || !rt.gameObject.activeInHierarchy) { was = false; return; }
         Vector3 c = rt.TransformPoint(rt.rect.center);
-        bool p = IndexTipNear(_rightSkel, c, PokeRadius) || IndexTipNear(_leftSkel, c, PokeRadius);
+        float r2  = PokeRadius * PokeRadius;
+        bool p = (rTip.HasValue && (rTip.Value - c).sqrMagnitude < r2)
+              || (lTip.HasValue && (lTip.Value - c).sqrMagnitude < r2);
         if (p && !was) onDown();
         was = p;
-    }
-
-    bool IndexTipNear(OVRSkeleton sk, Vector3 pt, float r)
-    {
-        if (sk == null || !sk.IsInitialized) return false;
-        foreach (var b in sk.Bones)
-            if (b.Id == OVRSkeleton.BoneId.Hand_IndexTip)
-                return Vector3.Distance(b.Transform.position, pt) < r;
-        return false;
     }
 
     // ─────────────────────────────────────────────────────────────
