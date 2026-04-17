@@ -10,6 +10,9 @@ Proteins are projected into a shared 3D coordinate space using dimensionality re
 
 This app is part of ongoing research developing the **PhaRBP** (Phage Receptor Binding Protein) database — a curated resource for phage receptor binding proteins. Paper coming soon.
 
+### 📥 [Download Latest APK (Meta Quest 3)](https://github.com/victornemeth/ProteinVerse/releases/latest/download/ProteinVerse.apk)
+*See the [Releases page](https://github.com/victornemeth/ProteinVerse/releases) for patch notes and older versions.*
+
 ---
 
 ## Features
