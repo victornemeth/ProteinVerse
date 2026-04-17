@@ -75,9 +75,12 @@ public class UmapPointCloud : MonoBehaviour
     private Material     cloudMaterial;
     private MeshRenderer cloudRenderer;
     private Color32[]    _meshColors;       // CPU copy of vertex colors for runtime pin-color updates
-    private Color32[]    _metadataColors;   // per-point colors loaded from local binary (detection method)
-    private bool         _isMetadataColorMode = false;
-    public  bool         IsMetadataColorMode => _isMetadataColorMode;
+    private Color32[]    _colorsRBP;         // RBPdetect2 detection method colors
+    private Color32[]    _colorsFiberSpike;  // Domain: fiber vs spike (2-color)
+    private Color32[]    _colorsSpikeDetail; // Domain: spike detail (6-color)
+    private int          _colorMode = 0;     // 0=viridis, 1=RBPdetect2, 2=FiberSpike, 3=SpikeDetail
+    public  bool         IsMetadataColorMode => _colorMode != 0;
+    public  int          ColorModeIndex => _colorMode;
     private GameObject   _legendPanelGO;    // spawned when metadata color mode is active
 
     private static readonly int ShaderPointSize = Shader.PropertyToID("_PointSize");
@@ -177,7 +180,9 @@ public class UmapPointCloud : MonoBehaviour
         SetupAimRay();
         SetupHighlightMarker();
         StartCoroutine(LoadCSV());
-        StartCoroutine(LoadMetadataColors());
+        StartCoroutine(LoadColorBin("color_detection_method_RBPdetect2.bin", c => _colorsRBP = c));
+        StartCoroutine(LoadColorBin("color_domain_fiber_spike.bin",          c => _colorsFiberSpike = c));
+        StartCoroutine(LoadColorBin("color_domain_spike_detail.bin",         c => _colorsSpikeDetail = c));
 
         // Deselect the point whenever the info panel is closed (close button, or click-off)
         if (infoPanel != null)
@@ -355,82 +360,81 @@ public class UmapPointCloud : MonoBehaviour
     //  Metadata Color Loading
     // ─────────────────────────────────────────────────────────────
 
-    /// <summary>
-    /// Loads the per-point RGB binary from StreamingAssets (3 bytes per point, matching CSV order).
-    /// File: color_detection_method_RBPdetect2.bin — produced by the download script.
-    /// </summary>
-    IEnumerator LoadMetadataColors()
+    IEnumerator LoadColorBin(string filename, System.Action<Color32[]> onLoaded)
     {
-        string path = Path.Combine(Application.streamingAssetsPath, "color_detection_method_RBPdetect2.bin");
-
+        string path = Path.Combine(Application.streamingAssetsPath, filename);
 #if UNITY_ANDROID && !UNITY_EDITOR
         using var req = UnityWebRequest.Get(path);
         yield return req.SendWebRequest();
         if (req.result != UnityWebRequest.Result.Success)
-        { Debug.LogWarning($"[UmapPointCloud] Could not load metadata colors: {req.error}"); yield break; }
+        { Debug.LogWarning($"[UmapPointCloud] Could not load {filename}: {req.error}"); yield break; }
         byte[] raw = req.downloadHandler.data;
 #else
         if (!File.Exists(path))
-        { Debug.LogWarning($"[UmapPointCloud] Metadata color file not found: {path}"); yield break; }
+        { Debug.LogWarning($"[UmapPointCloud] Color file not found: {path}"); yield break; }
         byte[] raw = File.ReadAllBytes(path);
         yield return null;
 #endif
-
         int n = raw.Length / 3;
-        _metadataColors = new Color32[n * 4]; // 4 verts per point
+        var colors = new Color32[n * 4];
         for (int i = 0; i < n; i++)
         {
-            var c = new Color32(raw[i * 3], raw[i * 3 + 1], raw[i * 3 + 2], 255);
-            for (int k = 0; k < 4; k++)
-                _metadataColors[i * 4 + k] = c;
+            var c = new Color32(raw[i*3], raw[i*3+1], raw[i*3+2], 255);
+            for (int k = 0; k < 4; k++) colors[i*4+k] = c;
         }
-        Debug.Log($"[UmapPointCloud] Loaded metadata colors for {n} points.");
+        onLoaded(colors);
+        Debug.Log($"[UmapPointCloud] Loaded {filename}: {n} points.");
     }
 
-    /// <summary>
-    /// Toggles between viridis (depth-based) coloring and the metadata color scheme.
-    /// Pinned point colors are preserved on top of whichever base is active.
-    /// </summary>
-    public void ToggleMetadataColors()
+    public void CycleColorMode()
     {
         if (_meshColors == null || cloudMesh == null) return;
-        if (_metadataColors == null) { Debug.LogWarning("[UmapPointCloud] Metadata colors not loaded yet."); return; }
-        if (_metadataColors.Length != pointCount * 4)
+        // Advance to next mode, skipping any that haven't loaded yet
+        int next = (_colorMode + 1) % 4;
+        for (int attempts = 0; attempts < 4; attempts++)
         {
-            Debug.LogError($"[UmapPointCloud] Metadata color count mismatch: binary has {_metadataColors.Length / 4} points, cloud has {pointCount}. Regenerate the binary.");
-            return;
+            if (next == 0) break; // viridis always available
+            Color32[] cand = GetActiveColorArrayFor(next);
+            if (cand != null && cand.Length == pointCount * 4) break;
+            next = (next + 1) % 4;
         }
+        _colorMode = next;
+        ApplyCurrentColorMode();
+        if (_colorMode != 0) SpawnLegendPanel(); else DestroyLegendPanel();
+    }
 
-        _isMetadataColorMode = !_isMetadataColorMode;
+    Color32[] GetActiveColorArrayFor(int mode) => mode switch
+    {
+        1 => _colorsRBP,
+        2 => _colorsFiberSpike,
+        3 => _colorsSpikeDetail,
+        _ => null
+    };
 
-        // Rebuild base colors from the appropriate source
-        Color32[] source = _isMetadataColorMode ? _metadataColors : null;
+    Color32[] GetActiveColorArray() => GetActiveColorArrayFor(_colorMode);
+
+    void ApplyCurrentColorMode()
+    {
+        Color32[] source = GetActiveColorArray();
+        if (source != null && source.Length != pointCount * 4)
+        { Debug.LogError($"[UmapPointCloud] Color count mismatch for mode {_colorMode}."); return; }
+
         for (int i = 0; i < pointCount; i++)
         {
             Color32 c = source != null ? source[i * 4] : (Color32)pointColors[i];
             for (int k = 0; k < 4; k++)
                 _meshColors[i * 4 + k] = c;
         }
-
-        // Re-apply pinned point colors on top (they override the base)
-        foreach (var kvp in _pinnedPanels)
+        foreach (var panel in _pinnedPanels)
         {
-            int idx = kvp.CurrentPointIndex;
+            int idx = panel.CurrentPointIndex;
             if (idx >= 0 && idx < pointCount)
             {
-                Color32 pc = kvp.PinColor;
-                for (int k = 0; k < 4; k++)
-                    _meshColors[idx * 4 + k] = pc;
+                Color32 pc = panel.PinColor;
+                for (int k = 0; k < 4; k++) _meshColors[idx*4+k] = pc;
             }
         }
-
         cloudMesh.colors32 = _meshColors;
-
-        // Spawn or destroy the floating legend panel
-        if (_isMetadataColorMode)
-            SpawnLegendPanel();
-        else
-            DestroyLegendPanel();
     }
 
     void DestroyLegendPanel()
@@ -446,14 +450,43 @@ public class UmapPointCloud : MonoBehaviour
     {
         DestroyLegendPanel();
 
-        // ── Legend data (matches color_detection_method_RBPdetect2_legend.json) ─
-        string title = "Evidence: RBPdetect2";
-        var items = new (string name, Color color)[]
+        string title;
+        (string name, Color color)[] items;
+
+        switch (_colorMode)
         {
-            ("TSP",         new Color(52/255f,  152/255f, 219/255f)),
-            ("TF",          new Color(231/255f,  76/255f,  60/255f)),
-            ("No Evidence", new Color(189/255f, 195/255f, 199/255f)),
-        };
+            case 2:
+                title = "Domain: Fiber vs Spike";
+                items = new (string, Color)[]
+                {
+                    ("Tail fibers",  new Color( 52/255f, 152/255f, 219/255f)),
+                    ("Tail spikes",  new Color(243/255f, 156/255f,  18/255f)),
+                    ("Other",        new Color(189/255f, 195/255f, 199/255f)),
+                };
+                break;
+            case 3:
+                title = "Domain: Spike Detail";
+                items = new (string, Color)[]
+                {
+                    ("Tailspike structural",          new Color(231/255f,  76/255f,  60/255f)),
+                    ("Glycoside hydrolases",          new Color( 52/255f, 152/255f, 219/255f)),
+                    ("Sialidases / Neuraminidases",   new Color(155/255f,  89/255f, 182/255f)),
+                    ("Lysozymes / PGH",               new Color( 39/255f, 174/255f,  96/255f)),
+                    ("Capsule depoly / Hyaluronidase",new Color( 26/255f, 188/255f, 156/255f)),
+                    ("Pectate/Pectin/Polysacc lyases",new Color(243/255f, 156/255f,  18/255f)),
+                    ("Other",                         new Color(189/255f, 195/255f, 199/255f)),
+                };
+                break;
+            default: // mode 1: RBPdetect2
+                title = "Evidence: RBPdetect2";
+                items = new (string, Color)[]
+                {
+                    ("TSP",         new Color( 52/255f, 152/255f, 219/255f)),
+                    ("TF",          new Color(231/255f,  76/255f,  60/255f)),
+                    ("No Evidence", new Color(189/255f, 195/255f, 199/255f)),
+                };
+                break;
+        }
 
         // ── Position: in front of the camera, slightly to the right and at eye level ─
         Transform cam = cameraTransform != null ? cameraTransform : Camera.main?.transform;
@@ -1069,8 +1102,9 @@ static Color Viridis(float t)
     void RestorePointColor(int index)
     {
         if (pointColors == null || index < 0 || index >= pointCount) return;
-        Color baseColor = (_isMetadataColorMode && _metadataColors != null)
-            ? (Color)_metadataColors[index * 4]
+        Color32[] src = GetActiveColorArray();
+        Color baseColor = (src != null && src.Length == pointCount * 4)
+            ? (Color)src[index * 4]
             : pointColors[index];
         SetPointColor(index, baseColor);
         DestroyPinnedMarker(index);

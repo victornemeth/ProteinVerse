@@ -9,15 +9,24 @@ using Oculus.Interaction.Surfaces;
 public class WatchMenu : MonoBehaviour
 {
     // ── Configuration ────────────────────────────────────────────────
+    [Header("Hand Side")]
+    public bool isRightHand = false;
+
+    [Header("Menu Content")]
+    public bool showMoveButton  = true;
+    public bool showColorButton = true;
+    public string menuTitle = "PALM MENU";
+
     [Header("Menu Appearance")]
     public float panelWidth = 140f;
-    public float panelHeight = 220f;
-    [Tooltip("Overall scale of the menu in the world. Reduce this to make everything (including fonts) smaller.")]
-    public float globalScale = 0.0004f; // slightly larger text for palm
+    [Tooltip("Leave at 0 to auto-size based on which buttons are shown")]
+    public float panelHeightOverride = 0f;
+    [Tooltip("Overall scale of the menu in the world.")]
+    public float globalScale = 0.0008f;
     [Tooltip("Offset relative to the wrist bone (moves menu to the palm center)")]
-    public Vector3 menuOffset = new Vector3(0.02f, -0.02f, 0.06f); // Shift into palm: right(thumb-ish), down(out of palm), forward(towards fingers)
+    public Vector3 menuOffset = new Vector3(0.02f, -0.02f, 0.06f);
     [Tooltip("Rotation offset relative to the wrist bone")]
-    public Vector3 menuRotationOffset = new Vector3(180f, 0f, 0f); // Flipped 180 to face out of the palm instead of back of hand
+    public Vector3 menuRotationOffset = new Vector3(180f, 0f, 0f);
     public float transitionSpeed = 10f;
 
     [Header("Detection Thresholds")]
@@ -26,13 +35,13 @@ public class WatchMenu : MonoBehaviour
 
     // ── Internal State ────────────────────────────────────────────────
     private OVRCameraRig _rig;
-    private OVRSkeleton _leftSkel;
-    private OVRHand _leftHand;
-    
-    private CanvasGroup _canvasGroup;
+    private OVRSkeleton  _skeleton;
+    private OVRHand      _hand;
+
+    private CanvasGroup  _canvasGroup;
     private RectTransform _panelRT;
-    
-    private bool _isLookingAtWatch = false;
+
+    private bool  _isLookingAtWatch = false;
     private float _currentAlpha = 0f;
 
     private UmapPointCloud  _pointCloud;
@@ -41,29 +50,39 @@ public class WatchMenu : MonoBehaviour
     private TextMeshProUGUI _colorModeText;
     private Image           _colorModeBtnImg;
 
-    // Button colors for each mode
-    static readonly Color ColorSelectMode   = new Color(0.08f, 0.10f, 0.25f, 0.97f);  // dark navy
-    static readonly Color ColorMoveMode     = new Color(0.10f, 0.55f, 0.18f, 0.97f);  // vivid green
-    static readonly Color ColorViridis      = new Color(0.08f, 0.10f, 0.25f, 0.97f);  // dark navy (off)
-    static readonly Color ColorMetadata     = new Color(0.55f, 0.22f, 0.00f, 0.97f);  // amber (on)
+    // Button colors
+    static readonly Color ColorSelectMode = new Color(0.08f, 0.10f, 0.25f, 0.97f);
+    static readonly Color ColorMoveMode   = new Color(0.10f, 0.55f, 0.18f, 0.97f);
+    static readonly Color[] ColorModeColors = {
+        new Color(0.08f, 0.10f, 0.25f, 0.97f),  // 0: viridis / off
+        new Color(0.55f, 0.22f, 0.00f, 0.97f),  // 1: RBPdetect2 amber
+        new Color(0.13f, 0.40f, 0.67f, 0.97f),  // 2: fiber/spike blue
+        new Color(0.35f, 0.12f, 0.55f, 0.97f),  // 3: spike detail purple
+    };
+    static readonly string[] ColorModeLabels = {
+        "COLORS\nOFF",
+        "RBPDETECT2\nON",
+        "FIBER/SPIKE\nON",
+        "SPIKE\nDETAIL\nON",
+    };
 
     void Start()
     {
         _rig = FindFirstObjectByType<OVRCameraRig>();
         if (_rig != null)
         {
-            _leftSkel = _rig.leftHandAnchor.GetComponentInChildren<OVRSkeleton>();
-            _leftHand = _rig.leftHandAnchor.GetComponentInChildren<OVRHand>();
+            var anchor = isRightHand ? _rig.rightHandAnchor : _rig.leftHandAnchor;
+            _skeleton  = anchor.GetComponentInChildren<OVRSkeleton>();
+            _hand      = anchor.GetComponentInChildren<OVRHand>();
         }
 
         _pointCloud = FindFirstObjectByType<UmapPointCloud>();
 
         BuildMenu();
-        
-        // Start completely hidden
-        _canvasGroup.alpha = 0f;
-        _currentAlpha = 0f;
-        _panelRT.localScale = Vector3.zero;
+
+        _canvasGroup.alpha    = 0f;
+        _currentAlpha         = 0f;
+        _panelRT.localScale   = Vector3.zero;
     }
 
     void Update()
@@ -71,90 +90,66 @@ public class WatchMenu : MonoBehaviour
         if (_pointCloud != null && _toggleMoveText != null)
         {
             bool moving = _pointCloud.isMovementEnabled;
-            string expectedText = moving ? "MOVE MODE\nON" : "SELECT MODE\nOFF";
-            if (_toggleMoveText.text != expectedText)
-                _toggleMoveText.text = expectedText;
+            string t = moving ? "MOVE MODE\nON" : "SELECT MODE\nOFF";
+            if (_toggleMoveText.text != t) _toggleMoveText.text = t;
             if (_toggleMoveBtnImg != null)
             {
-                Color target = moving ? ColorMoveMode : ColorSelectMode;
-                if (_toggleMoveBtnImg.color != target)
-                    _toggleMoveBtnImg.color = target;
+                Color c = moving ? ColorMoveMode : ColorSelectMode;
+                if (_toggleMoveBtnImg.color != c) _toggleMoveBtnImg.color = c;
             }
         }
 
         if (_pointCloud != null && _colorModeText != null)
         {
-            bool meta = _pointCloud.IsMetadataColorMode;
-            string expectedText = meta ? "COLOR\nRBPdetect2\nON" : "COLOR\nRBPdetect2\nOFF";
-            if (_colorModeText.text != expectedText)
-                _colorModeText.text = expectedText;
+            int mode = _pointCloud.ColorModeIndex;
+            string t = ColorModeLabels[Mathf.Clamp(mode, 0, ColorModeLabels.Length - 1)];
+            if (_colorModeText.text != t) _colorModeText.text = t;
             if (_colorModeBtnImg != null)
             {
-                Color target = meta ? ColorMetadata : ColorViridis;
-                if (_colorModeBtnImg.color != target)
-                    _colorModeBtnImg.color = target;
+                Color c = ColorModeColors[Mathf.Clamp(mode, 0, ColorModeColors.Length - 1)];
+                if (_colorModeBtnImg.color != c) _colorModeBtnImg.color = c;
             }
         }
 
-        if (_rig == null || _leftSkel == null || !_leftSkel.IsInitialized || _leftHand == null || !_leftHand.IsTracked)
+        if (_rig == null || _skeleton == null || !_skeleton.IsInitialized || _hand == null || !_hand.IsTracked)
         {
-            // If hand is not tracked, smoothly hide the menu
             UpdateMenuVisibility(false, null, Vector3.zero);
             return;
         }
 
-        // Get the wrist bone
-        var wristBone = GetBone(_leftSkel, OVRSkeleton.BoneId.Hand_WristRoot);
-        
+        var wristBone = GetBone(_skeleton, OVRSkeleton.BoneId.Hand_WristRoot);
         if (wristBone == null) return;
 
-        // Base anchor point: Wrist joint
-        // The center of the palm is generally slightly forward (towards fingers) and 'down' (out of the palm face)
         Vector3 anchorPosition = wristBone.Transform.position;
+        Vector3 palmNormal     = -wristBone.Transform.up;
+        Vector3 cameraPos      = _rig.centerEyeAnchor.position;
+        Vector3 palmToCamera   = (cameraPos - anchorPosition).normalized;
 
-        // Approximate the palm normal: Meta Quest usually puts "up" out the back of the hand,
-        // meaning "down" (-up) is straight out of the palm!
-        Vector3 palmNormal = -wristBone.Transform.up; 
-        
-        // Vector from palm to camera
-        Vector3 cameraPos = _rig.centerEyeAnchor.position;
-        Vector3 palmToCamera = (cameraPos - anchorPosition).normalized;
-
-        // Calculate if the user is looking at their palm
-        float dotProduct = Vector3.Dot(palmNormal, palmToCamera);
-        _isLookingAtWatch = dotProduct > facingThreshold;
+        float dot = Vector3.Dot(palmNormal, palmToCamera);
+        _isLookingAtWatch = dot > facingThreshold;
 
         UpdateMenuVisibility(_isLookingAtWatch, wristBone.Transform, anchorPosition);
     }
 
     void UpdateMenuVisibility(bool visible, Transform wristTransform, Vector3 anchorPosition)
     {
-        // Smooth transition for alpha only
         float targetAlpha = visible ? 1f : 0f;
         _currentAlpha = Mathf.MoveTowards(_currentAlpha, targetAlpha, Time.deltaTime * transitionSpeed);
-        
         _canvasGroup.alpha = _currentAlpha;
-        _panelRT.localScale = Vector3.one * globalScale; // DO NOT animate scale! It breaks Poke interaction bounds.
+        _panelRT.localScale = Vector3.one * globalScale;
 
-        bool isVisibleThreshold = _currentAlpha > 0.01f;
-        
-        // Enable/disable rendering components to save performance when hidden
-        if (_canvasGroup.gameObject.activeSelf != isVisibleThreshold)
-        {
-            _canvasGroup.gameObject.SetActive(isVisibleThreshold);
-        }
+        bool show = _currentAlpha > 0.01f;
+        if (_canvasGroup.gameObject.activeSelf != show)
+            _canvasGroup.gameObject.SetActive(show);
 
-        if (isVisibleThreshold && wristTransform != null)
+        if (show && wristTransform != null)
         {
-            // Position the menu relative to the calculated watch anchor point
-            Vector3 targetPosition = anchorPosition 
-                                   + wristTransform.right * menuOffset.x 
-                                   + wristTransform.up * menuOffset.y 
-                                   + wristTransform.forward * menuOffset.z;
-            
-            // Snap exactly to position and firmly lock rotation to the wrist!
-            // No billboarding to camera. It stays rigidly attached to the arm geometry.
-            _panelRT.position = targetPosition;
+            Vector3 pos = anchorPosition
+                        + wristTransform.right   * menuOffset.x
+                        + wristTransform.up      * menuOffset.y
+                        + wristTransform.forward * menuOffset.z;
+
+            _panelRT.position = pos;
             _panelRT.rotation = wristTransform.rotation * Quaternion.Euler(menuRotationOffset);
         }
     }
@@ -166,33 +161,36 @@ public class WatchMenu : MonoBehaviour
         return null;
     }
 
-    // ── Canvas Construction ─────────────────────────────────────────────
-    
+    // ── Canvas Construction ──────────────────────────────────────────────
+
     void BuildMenu()
     {
-        // 1. Root Canvas Object
-        GameObject canvasGo = new GameObject("WatchMenuCanvas");
+        int buttonCount = (showMoveButton ? 1 : 0) + (showColorButton ? 1 : 0);
+        float panelHeight = panelHeightOverride > 0f ? panelHeightOverride
+                          : buttonCount == 1 ? 130f : 220f;
+
+        // 1. Root Canvas
+        var canvasGo = new GameObject("WatchMenuCanvas");
         canvasGo.transform.SetParent(transform, false);
         canvasGo.layer = LayerMask.NameToLayer("UI");
-        
-        _canvasGroup = canvasGo.AddComponent<CanvasGroup>();
-        _panelRT = canvasGo.AddComponent<RectTransform>();
-        _panelRT.sizeDelta = new Vector2(panelWidth, panelHeight);
-        _panelRT.localScale = Vector3.one * globalScale; // Scale down for VR
 
-        Canvas canvas = canvasGo.AddComponent<Canvas>();
+        _canvasGroup = canvasGo.AddComponent<CanvasGroup>();
+        _panelRT     = canvasGo.AddComponent<RectTransform>();
+        _panelRT.sizeDelta  = new Vector2(panelWidth, panelHeight);
+        _panelRT.localScale = Vector3.one * globalScale;
+
+        var canvas = canvasGo.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.WorldSpace;
         canvasGo.AddComponent<GraphicRaycaster>();
-        
-        // Oculus Interaction setup
+
         EnsureEventSystemHasPointableCanvasModule();
         var pc = canvasGo.AddComponent<PointableCanvas>();
         pc.InjectAllPointableCanvas(canvas);
-        AddPokeInteractable(pc, canvasGo);
+        AddPokeInteractable(pc, canvasGo, panelWidth, panelHeight);
 
         var font = TMP_Settings.defaultFontAsset;
 
-        // 2. Background (Holographic style matching InfoPanel)
+        // 2. Background
         var bgGo = new GameObject("Background");
         bgGo.transform.SetParent(_panelRT, false);
         var bgRT = bgGo.AddComponent<RectTransform>();
@@ -200,84 +198,105 @@ public class WatchMenu : MonoBehaviour
         bgRT.offsetMin = bgRT.offsetMax = Vector2.zero;
         var bgImg = bgGo.AddComponent<Image>();
         bgImg.color = new Color(0.05f, 0.07f, 0.15f, 0.97f);
-        bgImg.raycastTarget = false; // Prevent blocking pokes
+        bgImg.raycastTarget = false;
 
-        // Optional: Border/glow
+        // 3. Border
         var borderGo = new GameObject("Border");
         borderGo.transform.SetParent(_panelRT, false);
         var borderRT = borderGo.AddComponent<RectTransform>();
         borderRT.anchorMin = Vector2.zero; borderRT.anchorMax = Vector2.one;
         borderRT.offsetMin = borderRT.offsetMax = Vector2.zero;
         var borderImg = borderGo.AddComponent<Image>();
-        borderImg.color = new Color(0.2f, 0.8f, 1f, 0.2f); // Subtler border
-        borderImg.raycastTarget = false; // Prevent blocking pokes
+        borderImg.color = new Color(0.2f, 0.8f, 1f, 0.2f);
+        borderImg.raycastTarget = false;
 
-        // 3. Header
+        // 4. Header
         var headerRT = Pin("Header", bgRT, 0f, 30f);
         var headerImg = headerRT.gameObject.AddComponent<Image>();
         headerImg.color = new Color(0.12f, 0.14f, 0.36f, 1f);
-        headerImg.raycastTarget = false; // Prevent blocking pokes
-        
+        headerImg.raycastTarget = false;
+
         var titleRT = new GameObject("Title").AddComponent<RectTransform>();
         titleRT.SetParent(headerRT, false);
         titleRT.anchorMin = Vector2.zero; titleRT.anchorMax = Vector2.one;
         titleRT.offsetMin = new Vector2(12f, 0f);
         titleRT.offsetMax = new Vector2(-12f, 0f);
-        Label(titleRT, font, "PALM MENU", 12f, new Color(0.85f, 0.92f, 1f), FontStyles.Bold, TextAlignmentOptions.Center);
+        Label(titleRT, font, menuTitle, 12f, new Color(0.85f, 0.92f, 1f), FontStyles.Bold, TextAlignmentOptions.Center);
 
-        // 4a. Move Mode Toggle — top half of the panel (below the header)
+        // 5. Buttons
+        if (buttonCount == 2)
+        {
+            // Both buttons: move on top half, color on bottom half
+            BuildMoveButton(bgRT, font, new Vector2(0f, 0.5f), Vector2.one,
+                            new Vector2(6f, 3f), new Vector2(-6f, -36f));
+            BuildColorButton(bgRT, font, Vector2.zero, new Vector2(1f, 0.5f),
+                             new Vector2(6f, 6f), new Vector2(-6f, -3f));
+        }
+        else if (showMoveButton)
+        {
+            // Full height (below header)
+            BuildMoveButton(bgRT, font, Vector2.zero, Vector2.one,
+                            new Vector2(6f, 6f), new Vector2(-6f, -36f));
+        }
+        else if (showColorButton)
+        {
+            BuildColorButton(bgRT, font, Vector2.zero, Vector2.one,
+                             new Vector2(6f, 6f), new Vector2(-6f, -36f));
+        }
+    }
+
+    void BuildMoveButton(RectTransform parent, TMP_FontAsset font,
+                         Vector2 anchorMin, Vector2 anchorMax,
+                         Vector2 offsetMin, Vector2 offsetMax)
+    {
         var btnRT = new GameObject("MoveModeBtn").AddComponent<RectTransform>();
-        btnRT.SetParent(bgRT, false);
-        btnRT.anchorMin = new Vector2(0f, 0.5f);
-        btnRT.anchorMax = Vector2.one;
-        btnRT.offsetMin = new Vector2(6f,  3f);   // 3 px gap at middle, 6 px sides
-        btnRT.offsetMax = new Vector2(-6f, -36f); // 6 px sides; 36 px from top (30 header + 6 gap)
+        btnRT.SetParent(parent, false);
+        btnRT.anchorMin = anchorMin; btnRT.anchorMax = anchorMax;
+        btnRT.offsetMin = offsetMin; btnRT.offsetMax = offsetMax;
 
-        bool initialMoving = _pointCloud != null && _pointCloud.isMovementEnabled;
+        bool moving = _pointCloud != null && _pointCloud.isMovementEnabled;
         var btnImg = btnRT.gameObject.AddComponent<Image>();
-        btnImg.color = initialMoving ? ColorMoveMode : ColorSelectMode;
+        btnImg.color = moving ? ColorMoveMode : ColorSelectMode;
         btnImg.raycastTarget = true;
 
         var btn = btnRT.gameObject.AddComponent<Button>();
         btn.targetGraphic = btnImg;
-        var colors = btn.colors;
-        colors.normalColor      = Color.white;
-        colors.highlightedColor = new Color(1.18f, 1.18f, 1.18f, 1f);
-        colors.pressedColor     = new Color(0.75f, 0.75f, 0.75f, 1f);
-        colors.colorMultiplier  = 1f;
-        btn.colors = colors;
+        var c = btn.colors;
+        c.normalColor = Color.white; c.highlightedColor = new Color(1.18f,1.18f,1.18f,1f);
+        c.pressedColor = new Color(0.75f,0.75f,0.75f,1f); c.colorMultiplier = 1f;
+        btn.colors = c;
 
-        string initialText = initialMoving ? "MOVE MODE\nON" : "SELECT MODE\nOFF";
-        _toggleMoveText = Label(btnRT, font, initialText, 18f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
-        _toggleMoveBtnImg = btnImg;
+        _toggleMoveText    = Label(btnRT, font, moving ? "MOVE MODE\nON" : "SELECT MODE\nOFF",
+                                   18f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
+        _toggleMoveBtnImg  = btnImg;
         btn.onClick.AddListener(OnToggleMoveModeClicked);
+    }
 
-        // 4b. Color Mode Toggle — bottom half of the panel
-        var colorBtnRT = new GameObject("ColorModeBtn").AddComponent<RectTransform>();
-        colorBtnRT.SetParent(bgRT, false);
-        colorBtnRT.anchorMin = Vector2.zero;
-        colorBtnRT.anchorMax = new Vector2(1f, 0.5f);
-        colorBtnRT.offsetMin = new Vector2(6f,  6f);   // 6 px bottom & sides
-        colorBtnRT.offsetMax = new Vector2(-6f, -3f);  // 3 px gap at middle, 6 px sides
+    void BuildColorButton(RectTransform parent, TMP_FontAsset font,
+                          Vector2 anchorMin, Vector2 anchorMax,
+                          Vector2 offsetMin, Vector2 offsetMax)
+    {
+        var btnRT = new GameObject("ColorModeBtn").AddComponent<RectTransform>();
+        btnRT.SetParent(parent, false);
+        btnRT.anchorMin = anchorMin; btnRT.anchorMax = anchorMax;
+        btnRT.offsetMin = offsetMin; btnRT.offsetMax = offsetMax;
 
-        bool initialMeta = _pointCloud != null && _pointCloud.IsMetadataColorMode;
-        var colorBtnImg = colorBtnRT.gameObject.AddComponent<Image>();
-        colorBtnImg.color = initialMeta ? ColorMetadata : ColorViridis;
-        colorBtnImg.raycastTarget = true;
+        int mode = _pointCloud != null ? _pointCloud.ColorModeIndex : 0;
+        var btnImg = btnRT.gameObject.AddComponent<Image>();
+        btnImg.color = ColorModeColors[Mathf.Clamp(mode, 0, ColorModeColors.Length - 1)];
+        btnImg.raycastTarget = true;
 
-        var colorBtn = colorBtnRT.gameObject.AddComponent<Button>();
-        colorBtn.targetGraphic = colorBtnImg;
-        var colorColors = colorBtn.colors;
-        colorColors.normalColor      = Color.white;
-        colorColors.highlightedColor = new Color(1.18f, 1.18f, 1.18f, 1f);
-        colorColors.pressedColor     = new Color(0.75f, 0.75f, 0.75f, 1f);
-        colorColors.colorMultiplier  = 1f;
-        colorBtn.colors = colorColors;
+        var btn = btnRT.gameObject.AddComponent<Button>();
+        btn.targetGraphic = btnImg;
+        var c = btn.colors;
+        c.normalColor = Color.white; c.highlightedColor = new Color(1.18f,1.18f,1.18f,1f);
+        c.pressedColor = new Color(0.75f,0.75f,0.75f,1f); c.colorMultiplier = 1f;
+        btn.colors = c;
 
-        string initialColorText = initialMeta ? "COLOR\nRBPdetect2\nON" : "COLOR\nRBPdetect2\nOFF";
-        _colorModeText = Label(colorBtnRT, font, initialColorText, 14f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
-        _colorModeBtnImg = colorBtnImg;
-        colorBtn.onClick.AddListener(OnToggleColorModeClicked);
+        _colorModeText   = Label(btnRT, font, ColorModeLabels[Mathf.Clamp(mode, 0, ColorModeLabels.Length - 1)],
+                                 18f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
+        _colorModeBtnImg = btnImg;
+        btn.onClick.AddListener(OnToggleColorModeClicked);
     }
 
     void EnsureEventSystemHasPointableCanvasModule()
@@ -289,13 +308,13 @@ public class WatchMenu : MonoBehaviour
             else
             {
                 var g = new GameObject("EventSystem");
-                g.AddComponent<EventSystem>(); 
+                g.AddComponent<EventSystem>();
                 g.AddComponent<PointableCanvasModule>();
             }
         }
     }
 
-    void AddPokeInteractable(PointableCanvas pc, GameObject canvasGo)
+    void AddPokeInteractable(PointableCanvas pc, GameObject canvasGo, float w, float h)
     {
         var pokeGO = new GameObject("PokeInteractable");
         pokeGO.transform.SetParent(canvasGo.transform, false);
@@ -308,7 +327,7 @@ public class WatchMenu : MonoBehaviour
         plane.InjectAllPlaneSurface(PlaneSurface.NormalFacing.Backward, true);
 
         var clip = surfGO.AddComponent<BoundsClipper>();
-        clip.Size = new Vector3(panelWidth, panelHeight, 500f);
+        clip.Size = new Vector3(w, h, 500f);
 
         var cps = surfGO.AddComponent<ClippedPlaneSurface>();
         cps.InjectAllClippedPlaneSurface(plane, new IBoundsClipper[] { clip });
@@ -324,14 +343,12 @@ public class WatchMenu : MonoBehaviour
     {
         if (_pointCloud == null) return;
         _pointCloud.isMovementEnabled = !_pointCloud.isMovementEnabled;
-        // Update() will sync text and color on the next frame.
     }
 
     private void OnToggleColorModeClicked()
     {
         if (_pointCloud == null) return;
-        _pointCloud.ToggleMetadataColors();
-        // Update() will sync text and color on the next frame.
+        _pointCloud.CycleColorMode();
     }
 
     // ── UI Layout Helpers ────────────────────────────────────────────────
@@ -347,31 +364,6 @@ public class WatchMenu : MonoBehaviour
         return rt;
     }
 
-    RectTransform AbsRow(RectTransform parent, float y, float height, float padding = 0f)
-    {
-        var rt = new GameObject("Row").AddComponent<RectTransform>();
-        rt.SetParent(parent, false);
-        rt.anchorMin = new Vector2(0f, 1f); rt.anchorMax = new Vector2(1f, 1f);
-        rt.pivot = new Vector2(0.5f, 1f);
-        rt.sizeDelta = new Vector2(-padding * 2f, height); 
-        rt.anchoredPosition = new Vector2(0f, y);
-        return rt;
-    }
-
-    RectTransform Divider(RectTransform parent, float y)
-    {
-        var rt = new GameObject("Div").AddComponent<RectTransform>();
-        rt.SetParent(parent, false);
-        rt.anchorMin = new Vector2(0f, 1f); rt.anchorMax = new Vector2(1f, 1f);
-        rt.pivot = new Vector2(0.5f, 1f);
-        rt.sizeDelta = new Vector2(-24f, 1f);
-        rt.anchoredPosition = new Vector2(0f, y);
-        var img = rt.gameObject.AddComponent<Image>();
-        img.color = new Color(0.27f, 0.30f, 0.52f, 0.45f);
-        img.raycastTarget = false; // Extremely important! A 1px line overlaying a button can steal pokes!
-        return rt;
-    }
-
     TextMeshProUGUI Label(RectTransform parent, TMP_FontAsset font, string text, float size,
         Color color, FontStyles style, TextAlignmentOptions align)
     {
@@ -380,16 +372,11 @@ public class WatchMenu : MonoBehaviour
         var rt = go.AddComponent<RectTransform>();
         rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one;
         rt.offsetMin = rt.offsetMax = Vector2.zero;
-        
+
         var tmp = go.AddComponent<TextMeshProUGUI>();
-        tmp.font = font; 
-        tmp.text = text; 
-        tmp.fontSize = size;
-        tmp.color = color; 
-        tmp.fontStyle = style; 
-        tmp.alignment = align;
+        tmp.font = font; tmp.text = text; tmp.fontSize = size;
+        tmp.color = color; tmp.fontStyle = style; tmp.alignment = align;
         tmp.raycastTarget = false;
-        
         return tmp;
     }
 }

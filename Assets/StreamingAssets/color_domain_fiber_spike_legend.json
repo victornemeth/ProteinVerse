@@ -1,0 +1,17 @@
+{
+  "title": "Domain: Fiber vs Spike",
+  "items": [
+    {
+      "name": "Tail fibers",
+      "color": "#3498db"
+    },
+    {
+      "name": "Tail spikes",
+      "color": "#f39c12"
+    },
+    {
+      "name": "Other",
+      "color": "#bdc3c7"
+    }
+  ]
+}

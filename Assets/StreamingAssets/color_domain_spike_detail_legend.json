@@ -1,0 +1,33 @@
+{
+  "title": "Domain: Spike Detail",
+  "items": [
+    {
+      "name": "Tailspike structural",
+      "color": "#e74c3c"
+    },
+    {
+      "name": "Glycoside hydrolases",
+      "color": "#3498db"
+    },
+    {
+      "name": "Sialidases / Neuraminidases",
+      "color": "#9b59b6"
+    },
+    {
+      "name": "Lysozymes / PGH",
+      "color": "#27ae60"
+    },
+    {
+      "name": "Capsule depolymerases / Hyaluronidases",
+      "color": "#1abc9c"
+    },
+    {
+      "name": "Pectate/Pectin/Polysacc lyases",
+      "color": "#f39c12"
+    },
+    {
+      "name": "Other",
+      "color": "#bdc3c7"
+    }
+  ]
+}
