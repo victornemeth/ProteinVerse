@@ -1,5 +1,9 @@
 # ProteinVerse
 
+<p align="center">
+  <img src="Assets/icon.png" width="180" alt="ProteinVerse icon"/>
+</p>
+
 A virtual reality application for exploring protein structural diversity in immersive 3D space. Built for **Meta Quest 3** using Unity.
 
 Proteins are projected into a shared 3D coordinate space using dimensionality reduction (UMAP, PCA, or t-SNE) applied to a structural similarity matrix, then rendered as an interactive point cloud in VR. Each point is a unique protein — you can reach out, select one, and instantly see its 3D structure, physicochemical properties, and domain architecture floating in front of you.
