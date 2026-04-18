@@ -128,6 +128,11 @@ public class UmapPointCloud : MonoBehaviour
     private int  selectedIndex = -1;
     private int  _hoverTick    = 0;   // throttle hover job to every other frame
 
+    // Initial transform — stored in Start() so ResetToDefaults() can snap back
+    private Vector3    _initialPosition;
+    private Quaternion _initialRotation;
+    private Vector3    _initialScale;
+
     // Previous-frame pinch state for edge detection
     private bool wasRightPinch;
     private bool wasLeftPinch;
@@ -180,6 +185,10 @@ public class UmapPointCloud : MonoBehaviour
 
     void Start()
     {
+        _initialPosition = transform.position;
+        _initialRotation = transform.rotation;
+        _initialScale    = transform.localScale;
+
         SetupAimRay();
         SetupHighlightMarker();
         StartCoroutine(LoadCSV());
@@ -1162,6 +1171,34 @@ static Color Viridis(float t)
     // ─────────────────────────────────────────────────────────────
     //  Public API
     // ─────────────────────────────────────────────────────────────
+
+    public void ResetToDefaults()
+    {
+        // Snap cloud back to original position/rotation/scale
+        transform.position   = _initialPosition;
+        transform.rotation   = _initialRotation;
+        transform.localScale = _initialScale;
+
+        // Turn off move mode and cancel any active grab
+        isMovementEnabled = false;
+        currentGrabState  = GrabState.None;
+
+        // Reset color mode to viridis
+        if (_colorMode != 0) SetColorMode(0);
+
+        // Close active info panel
+        if (infoPanel != null && infoPanel.gameObject.activeSelf)
+            infoPanel.Hide();
+
+        // Close all pinned panels (copy list first — Hide() modifies it)
+        var toClose = new System.Collections.Generic.List<PointInfoPanel>(_pinnedPanels);
+        foreach (var p in toClose) p.Hide();
+
+        // Clear selection state
+        selectedIndex = -1;
+        hoveredIndex  = -1;
+        infoLabel?.gameObject.SetActive(false);
+    }
 
     public string GetSequenceId(int index) =>
         (sequenceIds != null && index >= 0 && index < pointCount) ? sequenceIds[index] : null;
