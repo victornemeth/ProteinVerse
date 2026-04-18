@@ -46,15 +46,6 @@ public class WatchMenu : MonoBehaviour
     // Move button
     private TextMeshProUGUI _toggleMoveText;
     private Image           _toggleMoveBtnImg;
-    private RectTransform   _moveBtnRT;
-
-    // Long-press reset
-    private Image _progressRing;
-    private float _holdStart       = -1f;
-    private bool  _holdFired       = false;
-    private bool  _suppressClick   = false;
-    private const float HoldTime   = 3f;
-    private const float PokeRadius = 0.045f;
 
     // Color mode buttons (one per mode: 0=viridis, 1=RBP, 2=fiber/spike, 3=spike detail)
     private readonly Image[]           _colorBtnImages = new Image[4];
@@ -142,48 +133,6 @@ public class WatchMenu : MonoBehaviour
         bool looking       = Vector3.Dot(palmNormal, toCamera) > facingThreshold;
 
         UpdateVisibility(looking, wristBone.Transform, anchor);
-        UpdateLongPress();
-    }
-
-    void UpdateLongPress()
-    {
-        if (_moveBtnRT == null || _progressRing == null || _pointCloud == null) return;
-
-        // Find index tip on the palm-menu hand
-        Vector3? tip = GetIndexTip(_skeleton);
-        Vector3 center = _moveBtnRT.TransformPoint(_moveBtnRT.rect.center);
-        bool near = tip.HasValue && (tip.Value - center).sqrMagnitude < PokeRadius * PokeRadius;
-
-        if (!near)
-        {
-            _holdStart = -1f;
-            _holdFired = false;
-            _progressRing.fillAmount = 0f;
-            return;
-        }
-
-        if (_holdStart < 0f) _holdStart = Time.time;
-
-        float t = (Time.time - _holdStart) / HoldTime;
-        _progressRing.fillAmount = Mathf.Clamp01(t);
-
-        if (t >= 1f && !_holdFired)
-        {
-            _holdFired     = true;
-            _suppressClick = true;
-            _progressRing.fillAmount = 0f;
-            _holdStart = -1f;
-            _pointCloud.ResetToDefaults();
-        }
-    }
-
-    static Vector3? GetIndexTip(OVRSkeleton sk)
-    {
-        if (sk == null || !sk.IsInitialized) return null;
-        foreach (var b in sk.Bones)
-            if (b.Id == OVRSkeleton.BoneId.Hand_IndexTip)
-                return b.Transform.position;
-        return null;
     }
 
     void UpdateVisibility(bool visible, Transform wrist, Vector3 anchor)
@@ -307,13 +256,12 @@ public class WatchMenu : MonoBehaviour
 
         bool moving = _pointCloud != null && _pointCloud.isMovementEnabled;
         var btnImg = btnRT.gameObject.AddComponent<Image>();
-        btnImg.color         = moving ? ColorMoveMode : ColorSelectMode;
+        btnImg.color        = moving ? ColorMoveMode : ColorSelectMode;
         btnImg.raycastTarget = true;
 
         var btn = btnRT.gameObject.AddComponent<Button>();
         SetButtonColors(btn, btnImg);
         btn.onClick.AddListener(() => {
-            if (_suppressClick) { _suppressClick = false; return; }
             if (_pointCloud != null)
                 _pointCloud.isMovementEnabled = !_pointCloud.isMovementEnabled;
         });
@@ -321,23 +269,6 @@ public class WatchMenu : MonoBehaviour
         _toggleMoveText   = MakeLabel(btnRT, font, moving ? "MOVE MODE\nON" : "SELECT MODE\nOFF",
                                       22f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
         _toggleMoveBtnImg = btnImg;
-        _moveBtnRT        = btnRT;
-
-        // Radial progress ring overlay (fills clockwise from top over 3-second hold)
-        var ringGO = new GameObject("ProgressRing");
-        ringGO.transform.SetParent(btnRT, false);
-        var ringRT = ringGO.AddComponent<RectTransform>();
-        ringRT.anchorMin = new Vector2(0.1f, 0.1f);
-        ringRT.anchorMax = new Vector2(0.9f, 0.9f);
-        ringRT.offsetMin = ringRT.offsetMax = Vector2.zero;
-        _progressRing              = ringGO.AddComponent<Image>();
-        _progressRing.color        = new Color(1f, 0.85f, 0.2f, 0.75f);  // amber
-        _progressRing.type         = Image.Type.Filled;
-        _progressRing.fillMethod   = Image.FillMethod.Radial360;
-        _progressRing.fillOrigin   = (int)Image.Origin360.Top;
-        _progressRing.fillClockwise = true;
-        _progressRing.fillAmount   = 0f;
-        _progressRing.raycastTarget = false;
     }
 
     void BuildColorButtons(RectTransform parent, TMP_FontAsset font)
