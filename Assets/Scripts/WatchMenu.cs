@@ -43,6 +43,12 @@ public class WatchMenu : MonoBehaviour
 
     private UmapPointCloud  _pointCloud;
 
+    // Pinch-hold reset (left move menu only)
+    private float  _pinchHoldStart    = -1f;
+    private bool   _pinchHoldFired    = false;
+    private Image  _progressRingImage = null;
+    private const float ResetHoldDuration = 7f;
+
     // Move button
     private TextMeshProUGUI _toggleMoveText;
     private Image           _toggleMoveBtnImg;
@@ -114,6 +120,46 @@ public class WatchMenu : MonoBehaviour
                 Color want = (i == active) ? full : dim;
                 if (_colorBtnImages[i].color != want)
                     _colorBtnImages[i].color = want;
+            }
+        }
+
+        // Pinch-hold reset: left move menu — pinch while menu is fully visible for 3 s
+        if (!isRightHand && showMoveButton && _progressRingImage != null)
+        {
+            bool pinchActive = _currentAlpha > 0.9f
+                            && _hand != null
+                            && _hand.GetFingerIsPinching(OVRHand.HandFinger.Index);
+
+            if (pinchActive)
+            {
+                if (_pinchHoldStart < 0f)
+                {
+                    _pinchHoldStart = Time.time;
+                    _pinchHoldFired = false;
+                    _progressRingImage.gameObject.SetActive(true);
+                }
+                if (!_pinchHoldFired)
+                {
+                    float elapsed = Time.time - _pinchHoldStart;
+                    _progressRingImage.fillAmount = Mathf.Clamp01(elapsed / ResetHoldDuration);
+                    if (elapsed >= ResetHoldDuration)
+                    {
+                        _pinchHoldFired = true;
+                        _progressRingImage.fillAmount = 0f;
+                        _progressRingImage.gameObject.SetActive(false);
+                        _pointCloud?.ResetToDefaults();
+                    }
+                }
+            }
+            else
+            {
+                _pinchHoldStart = -1f;
+                _pinchHoldFired = false;
+                if (_progressRingImage.gameObject.activeSelf)
+                {
+                    _progressRingImage.fillAmount = 0f;
+                    _progressRingImage.gameObject.SetActive(false);
+                }
             }
         }
 
@@ -269,6 +315,26 @@ public class WatchMenu : MonoBehaviour
         _toggleMoveText   = MakeLabel(btnRT, font, moving ? "MOVE MODE\nON" : "SELECT MODE\nOFF",
                                       22f, Color.white, FontStyles.Bold, TextAlignmentOptions.Center);
         _toggleMoveBtnImg = btnImg;
+
+        // Progress ring: radial fill that sweeps during pinch-hold reset
+        if (!isRightHand)
+        {
+            var ringGO = new GameObject("ProgressRing");
+            ringGO.transform.SetParent(btnRT, false);
+            var ringRT = ringGO.AddComponent<RectTransform>();
+            ringRT.anchorMin = new Vector2(0.15f, 0.15f);
+            ringRT.anchorMax = new Vector2(0.85f, 0.85f);
+            ringRT.offsetMin = ringRT.offsetMax = Vector2.zero;
+            _progressRingImage = ringGO.AddComponent<Image>();
+            _progressRingImage.color         = new Color(1f, 0.45f, 0.1f, 0.80f);
+            _progressRingImage.type          = Image.Type.Filled;
+            _progressRingImage.fillMethod    = Image.FillMethod.Radial360;
+            _progressRingImage.fillOrigin    = (int)Image.Origin360.Top;
+            _progressRingImage.fillClockwise = true;
+            _progressRingImage.fillAmount    = 0f;
+            _progressRingImage.raycastTarget = false;
+            ringGO.SetActive(false);  // hidden until pinch starts
+        }
     }
 
     void BuildColorButtons(RectTransform parent, TMP_FontAsset font)

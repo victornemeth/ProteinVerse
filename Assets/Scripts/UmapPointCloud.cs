@@ -59,6 +59,10 @@ public class UmapPointCloud : MonoBehaviour
     //  Data
     // ─────────────────────────────────────────────────────────────
 
+    private Vector3    _initialPosition;
+    private Quaternion _initialRotation;
+    private Vector3    _initialScale;
+
     private Vector3[] localPositions;   // normalized to [-0.5, 0.5]^3
     private NativeArray<Vector3> nativePositions;
     private NativeArray<int> nativeResultIndex;
@@ -180,6 +184,10 @@ public class UmapPointCloud : MonoBehaviour
 
     void Start()
     {
+        _initialPosition = transform.position;
+        _initialRotation = transform.rotation;
+        _initialScale    = transform.localScale;
+
         SetupAimRay();
         SetupHighlightMarker();
         StartCoroutine(LoadCSV());
@@ -1174,6 +1182,34 @@ static Color Viridis(float t)
         selectedIndex = -1;
         infoLabel?.gameObject.SetActive(false);
         infoPanel?.Hide();
+    }
+
+    public void ResetToDefaults()
+    {
+        // Snap cloud back to its spawn transform
+        transform.position   = _initialPosition;
+        transform.rotation   = _initialRotation;
+        transform.localScale = _initialScale;
+
+        // Exit move mode and clear any active grab
+        isMovementEnabled = false;
+        currentGrabState  = GrabState.None;
+
+        // Close active info panel
+        if (infoPanel != null && infoPanel.gameObject.activeSelf)
+            infoPanel.Hide();
+
+        // Close all pinned panels (iterate a copy — Hide() mutates _pinnedPanels via onHide)
+        var toClose = new System.Collections.Generic.List<PointInfoPanel>(_pinnedPanels);
+        foreach (var p in toClose) p.Hide();
+
+        // Reset colour to viridis
+        if (_colorMode != 0) SetColorMode(0);
+
+        // Clear hover/selection
+        selectedIndex = -1;
+        hoveredIndex  = -1;
+        infoLabel?.gameObject.SetActive(false);
     }
 
     // Finds the single nearest point within a sphere around the fingertip.
