@@ -4,13 +4,13 @@
   <img src="Assets/icon.png" width="350" alt="ProteinVerse icon"/>
 </p>
 
-A virtual reality application for exploring protein structural diversity in immersive 3D space. Built for **Meta Quest 3** using Unity.
+A virtual reality application for exploring protein structural diversity in immersive 3D space. Built with Unity for **Meta Quest 2, Quest 3, Quest 3S, and Quest Pro**.
 
 Proteins are projected into a shared 3D coordinate space using dimensionality reduction (UMAP, PCA, or t-SNE) applied to a structural similarity matrix, then rendered as an interactive point cloud in VR. Each point is a unique protein — you can reach out, select one, and instantly see its 3D structure, physicochemical properties, and domain architecture floating in front of you.
 
 This app is part of ongoing research developing the **PhaRBP** (Phage Receptor Binding Protein) database — a curated resource for phage receptor binding proteins. Paper coming soon.
 
-### 📥 [Download Latest APK (Meta Quest 3)](https://github.com/victornemeth/ProteinVerse/releases/latest/download/ProteinVerse.apk)
+### 📥 [Download Latest APK (Meta Quest 2 / 3 / 3S / Pro)](https://github.com/victornemeth/ProteinVerse/releases/latest/download/ProteinVerse.apk)
 *See the [Releases page](https://github.com/victornemeth/ProteinVerse/releases) for patch notes and older versions.*
 
 ---
@@ -26,7 +26,8 @@ This app is part of ongoing research developing the **PhaRBP** (Phage Receptor B
 - **Release protein structures** — detach the 3D model from the panel and hold it in your hand, scale it with two hands, recall it back
 - **Pin panels** — keep a panel open while you explore other proteins; each pinned panel gets a distinct colour matched to its point in the cloud
 - **Move mode** — grab and reposition / rescale the entire point cloud via the watch menu on your wrist
-- Hand tracking and controller support
+- **Hand tracking** — full markerless hand tracking support; all interactions (pinch to select, grab to move, pinch-hold to reset) work without controllers
+- **Controller support** — works equally well with Touch controllers
 
 ---
 
@@ -36,7 +37,7 @@ This app is part of ongoing research developing the **PhaRBP** (Phage Receptor B
 |---|---|
 | Unity | 2022.3 LTS or later |
 | Meta XR SDK | v57 or later (tested on v85) |
-| Target device | Meta Quest 3 |
+| Target device | Meta Quest 2, Quest 3, Quest 3S, Quest Pro |
 | Build platform | Android (ARM64) |
 
 > The app requires an internet connection at runtime to fetch protein data and structures from the PhaRBP API.
@@ -70,7 +71,7 @@ If the Meta XR packages are not already present:
    - Set **Minimum API level** to Android 10 (API 29)
    - Enable **IL2CPP** scripting backend
    - Enable **ARM64** architecture
-3. Connect your Quest 3 with a USB cable (enable developer mode on the headset first)
+3. Connect your Quest headset with a USB cable (enable developer mode on the headset first)
 4. Click **Build and Run**
 
 ### 5. Point cloud data
