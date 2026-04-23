@@ -15,6 +15,40 @@ This app is part of ongoing research developing the **PhaRBP** (Phage Receptor B
 
 ---
 
+## Quick Look
+
+**Pinch a point to open its info panel.** Reach into the cloud and pinch — a panel opens with that protein's properties and 3D structure.
+
+<p align="center">
+  <img src="docs/gifs/PinchPoint.gif" width="600" alt="Pinching a point in the cloud to open its info panel"/>
+</p>
+
+**Release and hold the 3D structure.** Detach the rendered protein from the panel and hold it in your hand; scale it with two hands.
+
+<p align="center">
+  <img src="docs/gifs/HoldProteins.gif" width="600" alt="Releasing and holding a protein structure in hand"/>
+</p>
+
+**Inspect protein properties.** Each panel shows sequence properties, a colour-coded domain architecture bar, and associated phage hosts.
+
+<p align="center">
+  <img src="docs/gifs/ProteinProperties.gif" width="600" alt="Browsing protein properties and domain architecture"/>
+</p>
+
+**Move and rescale the whole point cloud.** Open the watch menu on your wrist to toggle move mode, then grab the cloud to reposition or resize it.
+
+<p align="center">
+  <img src="docs/gifs/MovePointCloud.gif" width="600" alt="Moving and rescaling the entire point cloud"/>
+</p>
+
+**Swap colouring modes.** Switch between RBPdetect2 evidence, fiber vs. spike, and spike subtype colourings from the watch menu.
+
+<p align="center">
+  <img src="docs/gifs/Coloring.gif" width="600" alt="Switching between colouring modes"/>
+</p>
+
+---
+
 ## Features
 
 - **63 000+ proteins** visualised as a navigable 3D point cloud
