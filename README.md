@@ -194,3 +194,4 @@ You can substitute `umap.UMAP` with `sklearn.decomposition.PCA` or `sklearn.mani
 - 3D protein rendering adapted from **[Nanover](https://github.com/IRL2/nanover-unity)** (cartoon shader pipeline)
 - Protein data served by the **PhaRBP** database — Ghent University
 - Built with **Meta XR SDK** and **Unity**
+- Thanks to all the testers for finding bugs and giving feedback. With special thanks to Francisco A. L. Kerrigan
