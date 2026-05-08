@@ -2,7 +2,7 @@
  * PointInfoPanel.cs
  * -----------------
  * World-space control-panel UI for a selected UMAP point.
- * Fetches protein data from pharp.ugent.be and displays:
+ * Fetches protein data from pharbp.ugent.be and displays:
  *   • Source ID + basic properties (MW, pI, hydropathy, aromaticity)
  *   • Domain architecture bar (proportional, colour-coded, with legend)
  *   • Associated proteins list
@@ -335,7 +335,7 @@ public class PointInfoPanel : MonoBehaviour
 
         if (_pdbRenderer != null)
         {
-            _pdbRenderer.FetchAndRender($"https://pharp.ugent.be/static/pdbs/{sequenceId}.pdb");
+            _pdbRenderer.FetchAndRender($"https://pharbp.ugent.be/static/pdbs/{sequenceId}.pdb");
         }
     }
 
@@ -495,7 +495,7 @@ public class PointInfoPanel : MonoBehaviour
 
     IEnumerator FetchBasic(string id)
     {
-        using var req = UnityWebRequest.Get($"https://pharp.ugent.be/api/sequence/{id}/basic/");
+        using var req = UnityWebRequest.Get($"https://pharbp.ugent.be/api/sequence/{id}/basic/");
         req.timeout = 15;
         yield return req.SendWebRequest();
 
@@ -540,7 +540,7 @@ public class PointInfoPanel : MonoBehaviour
 
     IEnumerator FetchDomains(string id)
     {
-        using var req = UnityWebRequest.Get($"https://pharp.ugent.be/api/sequence/{id}/domains/");
+        using var req = UnityWebRequest.Get($"https://pharbp.ugent.be/api/sequence/{id}/domains/");
         req.timeout = 15;
         yield return req.SendWebRequest();
 
@@ -670,7 +670,7 @@ public class PointInfoPanel : MonoBehaviour
 
     IEnumerator FetchProteins(string id)
     {
-        using var req = UnityWebRequest.Get($"https://pharp.ugent.be/api/sequence/{id}/proteins/");
+        using var req = UnityWebRequest.Get($"https://pharbp.ugent.be/api/sequence/{id}/proteins/");
         req.timeout = 15;
         yield return req.SendWebRequest();
 

@@ -130,7 +130,7 @@ To use your own dataset, replace `umap_coordinates_n15.csv` with one that follow
 
 ## APIs Used
 
-All protein data is fetched at runtime from the **PhaRBP API** hosted at `pharp.ugent.be`:
+All protein data is fetched at runtime from the **PhaRBP API** hosted at `pharbp.ugent.be`:
 
 | Endpoint | What it returns |
 |---|---|

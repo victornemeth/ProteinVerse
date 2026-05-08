@@ -6,7 +6,7 @@ using UnityEngine.Networking;
 
 public class ProteinVisualizer : MonoBehaviour
 {
-    public string pdbUrl = "https://pharp.ugent.be/static/pdbs/51efad3821e6294a824509b773c539cbf48031b9f04eb109a7dde3751064e9f1.pdb";
+    public string pdbUrl = "https://pharbp.ugent.be/static/pdbs/51efad3821e6294a824509b773c539cbf48031b9f04eb109a7dde3751064e9f1.pdb";
     public float ribbonWidth = 1.3f;
     public float ribbonThickness = 0.4f;
     public int splineDivisions = 10;
